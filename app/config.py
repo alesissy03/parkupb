@@ -1,3 +1,4 @@
+import os
 import json
 from pathlib import Path
 
@@ -27,8 +28,8 @@ def load_config(env: str = "development") -> dict:
         "SQLALCHEMY_DATABASE_URI": db_url,
         # opțional dar recomandat
         "SQLALCHEMY_TRACK_MODIFICATIONS": False,
-        # cheie de dev (în producție o schimbi)
-        "SECRET_KEY": "dev-secret-key-change-me",
+        # cheie de dev
+        "SECRET_KEY": data.get("secret_key", "secret"),
         # din config.json (le vei folosi când faci harta)
         "DEFAULT_ZOOM": data.get("default_zoom", 16),
         "DEFAULT_CENTER": data.get("default_center", [44.435, 26.05]),
