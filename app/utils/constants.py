@@ -27,14 +27,14 @@ RESERVATION_STATUSES = [
 ]
 
 # tipuri de locuri de parcare
-SPOT_TYPE_STUDENT = "student"
-SPOT_TYPE_STAFF = "staff"
+# SPOT_TYPE_STUDENT = "student"
+# SPOT_TYPE_STAFF = "staff"
 SPOT_TYPE_DISABLED = "disabled"
 SPOT_TYPE_VISITOR = "visitor"
 
 SPOT_TYPES = [
-    SPOT_TYPE_STUDENT,
-    SPOT_TYPE_STAFF,
+#     SPOT_TYPE_STUDENT,
+#     SPOT_TYPE_STAFF,
     SPOT_TYPE_DISABLED,
     SPOT_TYPE_VISITOR,
 ]

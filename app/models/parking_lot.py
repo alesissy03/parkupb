@@ -22,7 +22,22 @@ class ParkingLot(db.Model):
     __tablename__ = "parking_lots"
 
     # TODO (Task 2): definește coloanele conform documentației
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    campus_zone = db.Column(db.String(50), nullable=True)
+    lat_center = db.Column(db.Float, nullable=True)
+    lng_center = db.Column(db.Float, nullable=True)
+    total_spots = db.Column(db.Integer, nullable=True)
+    polygon_geojson = db.Column(db.Text, nullable=True)
+
     # TODO (Task 6): definește relația `spots` = db.relationship("ParkingSpot", ...)
+    parking_spots = db.relationship(
+        "ParkingSpot",
+        back_populates="lot",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
 
     def __repr__(self):
-        return "<ParkingLot id=? name=?>"
+        return f"<ParkingLot  {self.name}>"

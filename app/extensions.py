@@ -1,3 +1,4 @@
+# from app.models.user import User
 """
 Extensii globale Flask (DB, LoginManager, etc.)
 
@@ -29,4 +30,5 @@ def load_user(user_id):
     Deocamdată returnează None ca să nu mai arunce Flask-Login
     excepția 'Missing user_loader or request_loader'.
     """
-    return None
+    from app.models.user import User
+    return User.query.get(int(user_id))
