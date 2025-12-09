@@ -2,12 +2,27 @@ import os
 import json
 from pathlib import Path
 
-# directorul de bază al proiectului (folderul "parkupb")
+# directorul de baza al proiectului (folderul "parkupb")
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+def is_wsl():
+    try:
+        with open('/proc/version', 'r') as f:
+            return 'microsoft' in f.read().lower() or 'wsl' in f.read().lower()
+    except:
+        return False
+
+def get_db_path():
+    instance_dir = BASE_DIR / "instance"
+    instance_dir.mkdir(exist_ok=True)
+    db_file = instance_dir / "parking.db"
+    
+    db_path = str(db_file).replace("\\", "/")
+    return f"sqlite:///{db_path}"
 
 def load_config(env: str = "development") -> dict:
     """
-    Task 1 - MINIM NECESAR ca să pornească aplicația:
+    MINIM NECESAR ca să pornească aplicația:
     - citește config.json
     - setează SQLALCHEMY_DATABASE_URI
     - pune câteva valori default
@@ -19,23 +34,14 @@ def load_config(env: str = "development") -> dict:
         with open(config_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-    # din config.json ai deja:
-    # "db_url": "sqlite:///parking.db"
-    db_url = data.get("db_url", "sqlite:///parking.db")
+    db_url = get_db_path()
 
     config = {
-        # OBLIGATORIU pentru Flask-SQLAlchemy, altfel dă eroarea pe care o vezi
         "SQLALCHEMY_DATABASE_URI": db_url,
-        # opțional dar recomandat
         "SQLALCHEMY_TRACK_MODIFICATIONS": False,
-        # cheie de dev
         "SECRET_KEY": data.get("secret_key", "secret"),
-        # din config.json (le vei folosi când faci harta)
         "DEFAULT_ZOOM": data.get("default_zoom", 16),
         "DEFAULT_CENTER": data.get("default_center", [44.435, 26.05]),
     }
-
-    # TODO (restul lui Task 1):
-    # - poți adăuga aici setări diferite pentru "production", dacă e cazul
 
     return config

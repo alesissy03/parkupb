@@ -1,7 +1,3 @@
-<!-- TODO:
-formular email + parolă
-trimite POST către /api/auth/login
-afișează erori -->
 {% extends "base.html" %}
 
 {% block title %}ParkUPB - Login{% endblock %}
@@ -14,8 +10,7 @@ afișează erori -->
             <p>Conectează-te pentru a rezerva locuri de parcare</p>
         </div>
 
-        <form class="auth-form" method="POST" action="/api/auth/login">
-            <!-- TODO: Task 5 - Connect to backend -->
+        <form class="auth-form" method="POST" action="/login">
             
             <div class="form-group">
                 <label class="form-label" for="email">Email</label>
@@ -51,7 +46,6 @@ afișează erori -->
                 <p>Nu ai cont? <a href="/register">Înregistrează-te aici</a></p>
             </div>
 
-            <!-- Error display area -->
             <div id="login-errors" class="error-container"></div>
         </form>
 

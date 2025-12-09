@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}ParkUPB{% endblock %}</title>
     
-    <!-- Leaflet CSS (for maps) -->
+    <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
     <!-- App CSS -->
@@ -15,17 +15,24 @@
     {% block extra_css %}{% endblock %}
 </head>
 <body>
-    <!-- Navigation -->
     <nav class="navbar">
         <div class="navbar-container">
             <a href="/" class="navbar-brand">
                 <strong>🅿️ ParkUPB</strong>
             </a>
-            <div class="navbar-links">
-                <!-- TODO: Task 5 - will be dynamic based on user auth -->
-                <a href="/" class="nav-link">Hartă</a>
-                <a href="/login" class="nav-link">Login</a>
-                <a href="/register" class="nav-link btn-primary-outline">Înregistrare</a>
+            <div class="navbar-links" id="navbar-links">
+                {% if current_user.is_authenticated %}
+                    <a href="/" class="nav-link">Hartă</a>
+                    {% if current_user.role == 'admin' %}
+                        <a href="/admin/parking" class="nav-link">Admin Parcări</a>
+                    {% endif %}
+                    <span class="nav-user-info">👤 {{ current_user.full_name }}</span>
+                    <button id="logout-btn" class="nav-link btn-danger">Logout</button>
+                {% else %}
+                    <a href="/" class="nav-link">Hartă</a>
+                    <a href="/login" class="nav-link">Login</a>
+                    <a href="/register" class="nav-link btn-primary-outline">Înregistrare</a>
+                {% endif %}
             </div>
         </div>
     </nav>

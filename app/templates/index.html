@@ -4,10 +4,8 @@
 
 {% block content %}
 <div class="app-container">
-    <!-- Map Section (Left side - takes most space) -->
     <div class="map-section">
         <div id="map" class="map-container">
-            <!-- TODO: Task 7 - Leaflet map will be initialized here -->
             <div class="map-placeholder">
                 <div class="placeholder-content">
                     <h2>🗺️ Harta Parcărilor UPB</h2>
@@ -20,20 +18,21 @@
 
     <!-- Sidebar Section (Right side - info panel) -->
     <aside class="sidebar">
-        <!-- User Info Section -->
+        <!-- User Info Section - arată doar dacă e logat -->
+        {% if current_user.is_authenticated %}
         <section class="sidebar-section">
             <div class="section-header">
                 <h3>👤 Cont utilizator</h3>
             </div>
             <div class="section-content">
-                <!-- TODO: Task 5 - User authentication info -->
-                <div class="user-info-placeholder">
-                    <p>Nu ești autentificat</p>
-                    <a href="/login" class="btn btn-primary btn-block">Login</a>
-                    <a href="/register" class="btn btn-secondary btn-block">Înregistrare</a>
+                <div class="user-info-card">
+                    <p><strong>{{ current_user.full_name }}</strong></p>
+                    <p class="text-muted">{{ current_user.email }}</p>
+                    <p class="user-role"><span class="badge badge-primary">{{ current_user.role }}</span></p>
                 </div>
             </div>
         </section>
+        {% endif %}
 
         <!-- Filters Section -->
         <section class="sidebar-section">
@@ -41,21 +40,29 @@
                 <h3>🔍 Filtre</h3>
             </div>
             <div class="section-content">
-                <!-- TODO: Task 8 - Filtering logic -->
                 <div class="filter-group">
-                    <label class="form-label">Parcare</label>
-                    <select class="form-control" disabled>
-                        <option>Toate parcările</option>
+                    <label for="filter-parking-lot" class="form-label">Parcare:</label>
+                    <select id="filter-parking-lot" class="form-control" onchange="applyFilters()">
+                        <option value="">Toate parcările</option>
                     </select>
                 </div>
+                
                 <div class="filter-group">
-                    <label class="form-label">Status</label>
-                    <select class="form-control" disabled>
-                        <option>Toate locurile</option>
+                    <label for="filter-status" class="form-label">Status:</label>
+                    <select id="filter-status" class="form-control" onchange="applyFilters()">
+                        <option value="">Toate locurile</option>
+                        <option value="free">🟢 Libere</option>
+                        <option value="occupied">🔴 Ocupate</option>
+                        <option value="reserved">🟡 Rezervate</option>
                     </select>
                 </div>
-                <div class="filter-placeholder">
-                    <small>Task 8: Implementare filtrare</small>
+                
+                <button class="btn btn-secondary btn-block" onclick="resetFilters()">
+                    ↺ Resetează filtre
+                </button>
+                
+                <div class="filter-stats">
+                    <small id="spots-count">Locuri afișate: 0</small>
                 </div>
             </div>
         </section>

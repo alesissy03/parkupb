@@ -1,0 +1,619 @@
+{% extends "base.html" %}
+
+{% block title %}Admin - Locuri de Parcare{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <div class="admin-header">
+        <h1>⚙️ Admin - Gestionare Locuri de Parcare</h1>
+        <a href="/" class="btn btn-secondary">← Înapoi la hartă</a>
+    </div>
+
+    <div class="admin-content">
+        <div class="form-section">
+            <h2>Adaugă un nou Parking Lot</h2>
+
+            <div class="form-group">
+                <label for="lot-name" class="form-label">Nume parcare:</label>
+                <input type="text" id="lot-name" class="form-control" placeholder="ex: Parcare A" required />
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="total-spots" class="form-label">Număr total locuri:</label>
+                    <input type="number" id="total-spots" class="form-control" placeholder="ex: 24" min="1" required />
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Layout (coloane):</label>
+                    <div>
+                        <label><input type="radio" name="columns" value="1" checked /> 1 coloană</label>
+                        <label style="margin-left:1rem;"><input type="radio" name="columns" value="2" /> 2 coloane</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <p class="form-label">Selectează cele 4 colțuri ale parcării pe hartă:</p>
+                <button id="start-polygon" class="btn btn-secondary" onclick="startPolygonMode()">🖊️ Începe selecție 4 colțuri</button>
+                <button id="clear-polygon" class="btn btn-secondary" onclick="clearPolygonSelection()" style="margin-left:0.5rem;">🧹 Curăță selecția</button>
+                <div id="corners-list" style="margin-top:0.75rem; font-size:0.95rem; color:#333;">Niciun colț selectat</div>
+            </div>
+
+            <button class="btn btn-primary btn-block" onclick="createParkingLot()">
+                ➕ Creează Parking Lot și generează locuri
+            </button>
+
+            <div id="add-message" class="alert" style="display: none; margin-top: 1rem;"></div>
+        </div>
+
+        <div class="map-section">
+            <h2>Sau click pe hartă pentru a selecta coordonate</h2>
+            <div id="admin-map" class="map-container"></div>
+            <div id="map-info" class="info-box">
+                <p>Click pe hartă pentru a selecta coordonatele. Coordonatele selectate vor fi completate automat.</p>
+                <p><strong>Coordonate selectate:</strong></p>
+                <p id="selected-coords">Niciuna selectată</p>
+            </div>
+        </div>
+
+        <div class="table-section">
+            <h2>Locuri de parcare existente</h2>
+            <div id="spots-list" class="spots-table">
+                <p class="loading">Încărcare...</p>
+            </div>
+        </div>
+        
+        <div class="table-section">
+            <h2>Parking Lots existente</h2>
+            <div id="lots-list" class="spots-table">
+                <p class="loading">Încărcare...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let adminMap = null;
+let selectedLat = null;
+let selectedLng = null;
+let polygonMode = false;
+let corners = [];
+let cornerMarkers = [];
+let polygonLayer = null;
+
+function initAdminMap() {
+    adminMap = L.map('admin-map').setView([44.439611824934026, 26.0492114360659], 16);
+    
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 19,
+    }).addTo(adminMap);
+
+    adminMap.on('click', function(e) {
+        if (polygonMode) {
+            if (corners.length >= 4) {
+                return;
+            }
+            const lat = e.latlng.lat;
+            const lng = e.latlng.lng;
+            corners.push({ lat, lng });
+
+            const m = L.marker([lat, lng]).addTo(adminMap);
+            cornerMarkers.push(m);
+
+            if (polygonLayer) {
+                adminMap.removeLayer(polygonLayer);
+                polygonLayer = null;
+            }
+            if (corners.length >= 3) {
+                polygonLayer = L.polygon(corners.map(c => [c.lat, c.lng]), { color: 'blue', dashArray: '4' }).addTo(adminMap);
+            }
+
+            updateCornersList();
+            return;
+        }
+
+        selectedLat = e.latlng.lat;
+        selectedLng = e.latlng.lng;
+
+        const latInput = document.getElementById('latitude');
+        const lngInput = document.getElementById('longitude');
+        if (latInput) latInput.value = selectedLat.toFixed(6);
+        if (lngInput) lngInput.value = selectedLng.toFixed(6);
+
+        const sc = document.getElementById('selected-coords');
+        if (sc) sc.innerHTML = `<strong>Latitudine:</strong> ${selectedLat.toFixed(6)}<br/><strong>Longitudine:</strong> ${selectedLng.toFixed(6)}`;
+
+        console.log('✅ Coordonate selectate:', selectedLat, selectedLng);
+    });
+}
+
+function startPolygonMode() {
+    polygonMode = true;
+    corners = [];
+    clearCornerMarkers();
+    document.getElementById('corners-list').innerText = 'Click pe hartă pentru a adăuga 4 colțuri...';
+}
+
+function clearCornerMarkers() {
+    cornerMarkers.forEach(m => adminMap.removeLayer(m));
+    cornerMarkers = [];
+    if (polygonLayer) { adminMap.removeLayer(polygonLayer); polygonLayer = null; }
+}
+
+function clearPolygonSelection() {
+    polygonMode = false;
+    corners = [];
+    clearCornerMarkers();
+    updateCornersList();
+}
+
+function updateCornersList() {
+    const el = document.getElementById('corners-list');
+    if (!corners || corners.length === 0) {
+        el.innerText = 'Niciun colț selectat';
+        return;
+    }
+    let html = '<ol>' + corners.map((c, i) => `<li>#${i+1}: ${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}</li>`).join('') + '</ol>';
+    if (corners.length < 4) html += `<p style="color:#666">Mai adaugă ${4 - corners.length} colțuri.</p>`;
+    el.innerHTML = html;
+}
+
+function addParkingSpot() {
+    const parkingLot = document.getElementById('parking-lot')?.value;
+    if (!parkingLot) {
+        showMessage('Folosește formularul "Creează Parking Lot" pentru a adăuga parcări.', 'error');
+        return;
+    }
+}
+
+function createParkingLot() {
+    const name = document.getElementById('lot-name').value.trim();
+    const total = parseInt(document.getElementById('total-spots').value, 10);
+    const cols = parseInt(document.querySelector('input[name="columns"]:checked').value, 10);
+
+    if (!name) { showMessage('Completează numele parcării.', 'error'); return; }
+    if (!total || total <= 0) { showMessage('Completează numărul total de locuri.', 'error'); return; }
+    if (!corners || corners.length < 4) { showMessage('Selectează cele 4 colțuri ale parcării pe hartă.', 'error'); return; }
+
+    const payload = {
+        name: name,
+        corners: corners.slice(0,4),
+        total_spots: total,
+        columns: cols
+    };
+
+    fetch('/admin/lots', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(async r => {
+        const ct = r.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+            const body = await r.json().catch(() => ({}));
+            if (r.status === 201 && body.success) {
+                showMessage(`✅ Parcare creată (ID ${body.lot_id}) — ${body.created_spots} locuri generate.`, 'success');
+                clearPolygonSelection();
+                document.getElementById('lot-name').value = '';
+                document.getElementById('total-spots').value = '';
+                loadParkingSpots();
+                loadParkingLots();
+            } else if (r.status === 401 || r.status === 403) {
+                showMessage('Nu ești autorizat. Autentifică-te ca admin.', 'error');
+            } else {
+                showMessage(`Eroare: ${body.message || body.error || 'unknown'}`, 'error');
+            }
+        } else {
+            const text = await r.text().catch(() => '');
+            console.error('Non-JSON response:', text.substring(0, 300));
+            showMessage('Răspuns neașteptat de la server (probabil nu ești autentificat).', 'error');
+        }
+    })
+    .catch(err => {
+        console.error(err);
+        showMessage(`Eroare: ${err.message}`, 'error');
+    });
+}
+
+function showMessage(message, type) {
+    const messageDiv = document.getElementById('add-message');
+    messageDiv.textContent = message;
+    messageDiv.className = `alert alert-${type}`;
+    messageDiv.style.display = 'block';
+
+    setTimeout(() => {
+        messageDiv.style.display = 'none';
+    }, 5000);
+}
+
+function loadParkingSpots() {
+    fetch('/parking/spots')
+        .then(response => response.json())
+        .then(spots => {
+            const spotsList = document.getElementById('spots-list');
+            
+            if (spots.length === 0) {
+                spotsList.innerHTML = '<p class="no-data">Nu există locuri de parcare adăugate.</p>';
+                return;
+            }
+
+            let html = '<table class="spots-table-content">';
+            html += '<thead><tr><th>ID</th><th>Loc #</th><th>Parcare</th><th>Latitudine</th><th>Longitudine</th><th>Status</th><th>Acțiuni</th></tr></thead>';
+            html += '<tbody>';
+
+            spots.forEach(spot => {
+                const statusBtn = spot.is_occupied 
+                    ? `<button class="btn btn-sm btn-danger" onclick="toggleSpotStatus(${spot.id}, false)">🔴 Ocupat → Liber</button>`
+                    : `<button class="btn btn-sm btn-success" onclick="toggleSpotStatus(${spot.id}, true)">🟢 Liber → Ocupat</button>`;
+                
+                html += `
+                    <tr>
+                        <td>#${spot.id}</td>
+                        <td>${spot.spot_number || '-'}</td>
+                        <td>${spot.parking_lot}</td>
+                        <td>${spot.latitude.toFixed(6)}</td>
+                        <td>${spot.longitude.toFixed(6)}</td>
+                        <td>${statusBtn}</td>
+                        <td>
+                            <button class="btn btn-sm btn-danger" onclick="deleteParkingSpot(${spot.id})">
+                                🗑️ Șterge
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            spotsList.innerHTML = html;
+        })
+        .catch(error => {
+            console.error('Eroare la încărcarea locurilor:', error);
+            document.getElementById('spots-list').innerHTML = `<p class="error">Eroare: ${error.message}</p>`;
+        });
+}
+
+function toggleSpotStatus(spotId, newOccupiedStatus) {
+    const statusText = newOccupiedStatus ? 'ocupat' : 'liber';
+    
+    fetch(`/parking/spots/${spotId}`, {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_occupied: newOccupiedStatus })
+    })
+    .then(r => r.json().then(b => ({ status: r.status, body: b })))
+    .then(({ status, body }) => {
+        if (status === 200 && body.success) {
+            showMessage(`✅ Loc marcat ca ${statusText}.`, 'success');
+            loadParkingSpots();
+        } else if (status === 401 || status === 403) {
+            showMessage('Nu ești autorizat pentru această acțiune.', 'error');
+        } else {
+            showMessage('Eroare la actualizare: ' + (body.error || body.message || 'unknown'), 'error');
+        }
+    })
+    .catch(err => { console.error(err); showMessage('Eroare: '+err.message, 'error'); });
+}
+
+function deleteParkingSpot(spotId) {
+    if (!confirm('Sigur vrei să ștergi acest loc de parcare?')) return;
+    fetch(`/parking/spots/${spotId}`, { method: 'DELETE', credentials: 'same-origin' })
+        .then(r => r.json().then(b => ({ status: r.status, body: b })))
+        .then(({ status, body }) => {
+            if (status === 200 && body.success) {
+                showMessage('✅ Loc șters cu succes.', 'success');
+                loadParkingSpots();
+            } else if (status === 401 || status === 403) {
+                showMessage('Nu ești autorizat pentru această acțiune.', 'error');
+            } else {
+                showMessage('Eroare la ștergere: ' + (body.error || body.message || 'unknown'), 'error');
+            }
+        })
+        .catch(err => { console.error(err); showMessage('Eroare: '+err.message, 'error'); });
+}
+
+function loadParkingLots() {
+    fetch('/parking/lots', { credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(lots => {
+            const el = document.getElementById('lots-list');
+            if (!lots || lots.length === 0) {
+                el.innerHTML = '<p class="no-data">Nu există parking lots.</p>';
+                return;
+            }
+
+            let html = '<table class="spots-table-content">';
+            html += '<thead><tr><th>ID</th><th>Nume</th><th>Total locuri</th><th>Coloane</th><th>Acțiuni</th></tr></thead>';
+            html += '<tbody>';
+            lots.forEach(l => {
+                html += `
+                    <tr>
+                        <td>#${l.id}</td>
+                        <td>${l.name}</td>
+                        <td>${l.total_spots || '-'}</td>
+                        <td>${l.columns || '-'}</td>
+                        <td>
+                            <button class="btn btn-sm btn-secondary" onclick="editLot(${l.id})">✏️ Edit</button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteLot(${l.id})">🗑️ Delete</button>
+                        </td>
+                    </tr>
+                `;
+            });
+            html += '</tbody></table>';
+            el.innerHTML = html;
+        })
+        .catch(err => {
+            console.error(err);
+            document.getElementById('lots-list').innerHTML = `<p class="error">Eroare: ${err.message}</p>`;
+        });
+}
+
+function deleteLot(lotId) {
+    if (!confirm('Sigur vrei să ștergi acest parking lot și toate locurile din el?')) return;
+    fetch(`/parking/lots/${lotId}`, { method: 'DELETE', credentials: 'same-origin' })
+        .then(r => r.json().then(b => ({ status: r.status, body: b })))
+        .then(({ status, body }) => {
+            if (status === 200 && body.success) {
+                showMessage('✅ Parking lot șters cu succes.', 'success');
+                loadParkingLots();
+                loadParkingSpots();
+            } else if (status === 401 || status === 403) {
+                showMessage('Nu ești autorizat pentru această acțiune.', 'error');
+            } else {
+                showMessage('Eroare la ștergere: ' + (body.error || body.message || 'unknown'), 'error');
+            }
+        })
+        .catch(err => { console.error(err); showMessage('Eroare: '+err.message, 'error'); });
+}
+
+function editLot(lotId) {
+    const newName = prompt('Nume nou:');
+    const newTotal = prompt('Număr total locuri:');
+    const newCols = prompt('Coloane (1 sau 2):');
+    const cornersConfirm = confirm('Dorești să redesenezi colțurile parcării pe hartă?');
+    let cornersPayload = null;
+    if (cornersConfirm) {
+        if (!corners || corners.length < 4) {
+            alert('Selectează cele 4 colțuri pe hartă înainte de a regla colțurile.');
+            return;
+        }
+        cornersPayload = corners.slice(0,4);
+    }
+
+    const payload = {};
+    if (newName) payload.name = newName;
+    if (newTotal) payload.total_spots = parseInt(newTotal, 10);
+    if (newCols) payload.columns = parseInt(newCols, 10);
+    if (cornersPayload) payload.corners = cornersPayload;
+
+    if (Object.keys(payload).length === 0) { showMessage('Nimic de actualizat.', 'error'); return; }
+
+    fetch(`/parking/lots/${lotId}`, {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json().then(b => ({ status: r.status, body: b })))
+    .then(({ status, body }) => {
+        if (status === 200 && body.success) {
+            showMessage('✅ Parking lot actualizat.', 'success');
+            loadParkingLots();
+            loadParkingSpots();
+        } else {
+            showMessage('Eroare la actualizare: ' + (body.error || body.message || 'unknown'), 'error');
+        }
+    })
+    .catch(err => { console.error(err); showMessage('Eroare: '+err.message, 'error'); });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    initAdminMap();
+    loadParkingSpots();
+    loadParkingLots();
+});
+</script>
+
+<style>
+.admin-container {
+    max-width: 1400px;
+    margin: 2rem auto;
+    padding: 2rem;
+}
+
+.admin-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid #ddd;
+}
+
+.admin-header h1 {
+    margin: 0;
+    font-size: 1.8rem;
+}
+
+.admin-content {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+}
+
+.form-section {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.form-section h2 {
+    margin-top: 0;
+    font-size: 1.3rem;
+    margin-bottom: 1.5rem;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.95rem;
+}
+
+.checkbox-label input[type="checkbox"] {
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+}
+
+.map-section {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.map-section h2 {
+    margin-top: 0;
+    font-size: 1.3rem;
+    margin-bottom: 1rem;
+}
+
+#admin-map {
+    height: 400px;
+    margin-bottom: 1rem;
+    border-radius: 6px;
+    border: 2px solid #ddd;
+}
+
+.info-box {
+    background: #f8f9fa;
+    padding: 1rem;
+    border-radius: 6px;
+    border-left: 4px solid #007bff;
+}
+
+.info-box p {
+    margin: 0.5rem 0;
+    font-size: 0.9rem;
+}
+
+.table-section {
+    grid-column: 1 / -1;
+    background: white;
+    padding: 1.5rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.table-section h2 {
+    margin-top: 0;
+    font-size: 1.3rem;
+    margin-bottom: 1rem;
+}
+
+.spots-table-content {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.spots-table-content thead {
+    background: #f8f9fa;
+    border-bottom: 2px solid #dee2e6;
+}
+
+.spots-table-content th {
+    padding: 0.75rem;
+    text-align: left;
+    font-weight: 600;
+    color: #333;
+}
+
+.spots-table-content td {
+    padding: 0.75rem;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.spots-table-content tr:hover {
+    background-color: #f8f9fa;
+}
+
+.alert {
+    padding: 1rem;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+}
+
+.alert-success {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.alert-error {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+.loading, .no-data, .error {
+    text-align: center;
+    padding: 2rem;
+    color: #666;
+    font-style: italic;
+}
+
+.btn-sm {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.85rem;
+}
+
+.btn-secondary {
+    background-color: #6c757d;
+    color: white;
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn-secondary:hover {
+    background-color: #5a6268;
+}
+
+@media (max-width: 1024px) {
+    .admin-content {
+        grid-template-columns: 1fr;
+    }
+    
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+    
+    .map-section {
+        order: 3;
+    }
+    
+    .table-section {
+        order: 4;
+    }
+}
+</style>
+{% endblock %}

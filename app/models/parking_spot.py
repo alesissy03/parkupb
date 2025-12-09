@@ -1,7 +1,5 @@
 """
 Modelul ParkingSpot.
-
-TODO (Task 2):
 - Creează tabela `parking_spots` cu câmpurile:
     - id: INTEGER, PK, auto-increment
     - lot_id: INTEGER, FK -> parking_lots.id
@@ -10,10 +8,7 @@ TODO (Task 2):
     - current_status: VARCHAR (ex: 'free', 'occupied', 'reserved', 'out_of_service')
     - last_status_change: DATETIME (ultima schimbare de status)
     - polygon_geojson: TEXT (geometria locului în format GeoJSON)
-
-TODO (Task 6):
 - Relația many-to-one cu ParkingLot (parking_spot.lot).
-
 TODO (Task 9):
 - Relația one-to-many cu Reservation (spot.reservations).
 """
@@ -21,33 +16,54 @@ TODO (Task 9):
 from ..extensions import db
 from datetime import datetime
 from app.extensions import db
-from app.utils.constants import SPOT_TYPES, SPOT_STATUSES
+from app.utils.constants import SPOT_STATUSES
 
 class ParkingSpot(db.Model):
     __tablename__ = "parking_spots"
 
-    # TODO (Task 2, 6, 9): definește coloanele și relațiile
     id = db.Column(db.Integer, primary_key=True)
-    lot_id = db.Column(db.Integer, db.ForeignKey("parking_lots.id"), nullable=False)
-
-    spot_number = db.Column(db.String(20), nullable=False)  # poate fi și cod, nu doar număr
-    type = db.Column(db.String(20), nullable=False, default="student")
-    current_status = db.Column(db.String(20), nullable=False, default="free")
-    last_status_change = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-
-    polygon_geojson = db.Column(db.Text, nullable=True)
-
-    # Relații
-    lot = db.relationship("ParkingLot", back_populates="parking_spots")
-    reservations = db.relationship(
-        "Reservation",
-        back_populates="spot",
-        cascade="all, delete-orphan",
-        lazy="dynamic",
-    )
+    parking_lot = db.Column(db.String(100), nullable=False)  # Numele locului de parcare
+    spot_number = db.Column(db.String(20), nullable=True)  # Numărul/ID-ul locului în cadrul parcării (ex: 1, A12)
+    latitude = db.Column(db.Float, nullable=False)  # Coordonata latitudine
+    longitude = db.Column(db.Float, nullable=False)  # Coordonata longitudine
+    is_occupied = db.Column(db.Boolean, default=False, nullable=False)  # Ocupat (True/False)
+    occupied_by_email = db.Column(db.String(120), db.ForeignKey('users.email', ondelete="SET NULL"), nullable=True)
+    polygon_geojson = db.Column(db.Text, nullable=True)  # GeoJSON Polygon (dreptunghiul locului)
+    
+    # Informații despre rezervare (dacă există)
+    reservation_start_time = db.Column(db.DateTime, nullable=True)  # Ora de început a rezervării
+    reservation_end_time = db.Column(db.DateTime, nullable=True)  # Ora de plecare a rezervării
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     def __repr__(self):
-        return f"<ParkingSpot {self.spot_number} in lot {self.lot_name}"
+        return f"<ParkingSpot {self.parking_lot} ({self.id})>"
+    
+    def to_dict(self):
+        """Convertește modelul la dicționar pentru API response"""
+        try:
+            import ast
+            poly = ast.literal_eval(self.polygon_geojson) if self.polygon_geojson else None
+        except Exception:
+            poly = self.polygon_geojson
+        
+        return {
+            'id': self.id,
+            'parking_lot': self.parking_lot,
+            'spot_number': self.spot_number,
+            'latitude': self.latitude,
+            'longitude': self.longitude,
+            'is_occupied': self.is_occupied,
+            'occupied_by_email': self.occupied_by_email,
+            'polygon_geojson': poly,
+            'reservation': {
+                'start_time': self.reservation_start_time.isoformat() if self.reservation_start_time else None,
+                'end_time': self.reservation_end_time.isoformat() if self.reservation_end_time else None,
+            } if self.reservation_start_time or self.reservation_end_time else None,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat(),
+        }
     
     def set_status(self, new_status: str):
         """Utilitar pentru a actualiza statusul și timestamp-ul"""

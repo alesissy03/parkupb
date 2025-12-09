@@ -41,7 +41,8 @@ class Reservation(db.Model):
     #  1 user -> N reservations
     user = db.relationship("User", back_populates="reservations")
     #  1 parking_spot -> N reservations
-    spot = db.relationship("ParkingSpot", back_populates="reservations")
+    # Comentat pentru acum - va fi activat când ParkingSpot va avea relația back_populates
+    # spot = db.relationship("ParkingSpot", back_populates="reservations")
     
     # def is_valid_timeframe(self):
     #     """Check if timeframe is logical."""

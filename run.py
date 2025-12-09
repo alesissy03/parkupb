@@ -1,8 +1,8 @@
 from app import create_app
 
-# TODO (Task 4): alege config_name corespunzător (ex: "development", "production")
+# Alege config_name corespunzator (ex: "development", "production")
 app = create_app(config_name="development")
 
 if __name__ == "__main__":
-    # TODO (Task 4): configurează debug / host / port după nevoie
-    app.run(debug=True)
+    # Configureaza debug / host / port dupa nevoie
+    app.run(debug=True, host='0.0.0.0', port=5000)
