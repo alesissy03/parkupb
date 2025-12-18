@@ -11,6 +11,9 @@ let map = null;
 let markers = [];
 let parkingLotPolygons = [];
 
+let myReservations = [];     // loaded from /reservation/my
+let selectedReserveSpotId = null;
+
 const MARKER_COLORS = {
     free: '#28a745',      // Verde - liber
     occupied: '#dc3545',  // Rosu - ocupat
@@ -23,6 +26,192 @@ const PARKING_LOT_COLORS = {
     hover: '#ff7800',     // Portocaliu - hover
     selected: '#ffed4e'   // Galben - selectat
 };
+
+// helpers
+function isLoggedIn() {
+    return window.CURRENT_USER && window.CURRENT_USER.isAuthenticated;
+}
+
+function isoFromDatetimeLocal(value) {
+    // "YYYY-MM-DDTHH:MM" is accepted by datetime.fromisoformat
+    return value;
+}
+
+function formatDateRO(iso) {
+    try {
+        return new Date(iso).toLocaleString('ro-RO');
+    } catch {
+        return iso;
+    }
+}
+
+function getActiveReservationForSpot(spotId) {
+    // "active" means not cancelled/finished; service may mark finished automatically
+    return myReservations.find(r => r.spot_id === spotId && r.status === "active") || null;
+}
+
+function fetchMyReservations() {
+    if (!isLoggedIn()) return Promise.resolve([]);
+
+    return fetch('/reservations/my')
+        .then(res => {
+            if (res.status === 401) return [];
+            if (!res.ok) throw new Error(`API error: ${res.status}`);
+            return res.json();
+        })
+        .then(data => {
+            myReservations = Array.isArray(data) ? data : [];
+            renderReservationSidebar();
+            return myReservations;
+        })
+        .catch(err => {
+            console.warn('Eroare la incarcarea rezervarilor:', err);
+            myReservations = [];
+            renderReservationSidebar();
+            return [];
+        });
+}
+
+function renderReservationSidebar() {
+    const currentEl = document.getElementById('current-reservation-content');
+    const historyEl = document.getElementById('reservation-history-content');
+    if (!currentEl || !historyEl) return;
+
+    if (!isLoggedIn()) {
+        currentEl.innerHTML = `<div class="no-reservation"><p>Conectează-te pentru rezervări.</p></div>`;
+        historyEl.innerHTML = `<div class="empty-state"><p>Conectează-te pentru istoric.</p></div>`;
+        return;
+    }
+
+    if (!myReservations.length) {
+        currentEl.innerHTML = `<div class="no-reservation"><p>Nu ai nicio rezervare activă</p></div>`;
+        historyEl.innerHTML = `<div class="empty-state"><p>Nu ai rezervări</p></div>`;
+        return;
+    }
+
+    // Current = first active reservation by start_time (closest upcoming/current)
+    const active = myReservations
+        .filter(r => r.status === "active")
+        .sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
+
+    if (active.length) {
+        const r = active[0];
+        currentEl.innerHTML = `
+          <div class="user-info-card">
+            <p><strong>Spot #${r.spot_id}</strong></p>
+            <p class="text-muted">${formatDateRO(r.start_time)} → ${formatDateRO(r.end_time)}</p>
+            <button class="btn btn-danger btn-sm" onclick="cancelReservation(${r.id})">❌ Anulează</button>
+          </div>
+        `;
+    } else {
+        currentEl.innerHTML = `<div class="no-reservation"><p>Nu ai nicio rezervare activă</p></div>`;
+    }
+
+    // Full history
+    const rows = myReservations
+        .slice()
+        .sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
+        .map(r => `
+          <div style="padding:8px 0; border-bottom:1px solid rgba(0,0,0,0.06);">
+            <div style="display:flex; justify-content:space-between; gap:10px;">
+              <div>
+                <div><strong>#${r.spot_id}</strong> <span style="opacity:0.7;">(${r.status})</span></div>
+                <div style="font-size:12px; opacity:0.75;">${formatDateRO(r.start_time)} → ${formatDateRO(r.end_time)}</div>
+              </div>
+              <div style="text-align:right;">
+                ${r.status === "active" ? `<button class="btn btn-danger btn-sm" onclick="cancelReservation(${r.id})">Anulează</button>` : ``}
+              </div>
+            </div>
+          </div>
+        `)
+        .join('');
+
+    historyEl.innerHTML = rows || `<div class="empty-state"><p>Nu ai rezervări</p></div>`;
+}
+
+function showToast(message, type = 'info', timeoutMs = 5000) {
+  const container = document.getElementById('toast-container');
+
+  if (!container) {
+    // fallback if container missing
+    // alert(message);
+    console.warn("toast-container missing:", message);
+    return;
+  }
+
+  const colors = {
+    info:  '#ffffff',
+    success: '#ffffff',
+    warning: '#ffffff',
+    error: '#ffffff'
+  };
+
+  const borders = {
+    info:   '#3b82f6',
+    success:'#22c55e',
+    warning:'#f59e0b',
+    error:  '#ef4444'
+  };
+
+//   const icons = {
+//     info: 'ℹ️',
+//     success: '✅',
+//     warning: '⚠️',
+//     error: '❌'
+//   };
+
+  const toast = document.createElement('div');
+  toast.style.background = colors[type] || '#fff';
+  toast.style.color = '#111827';
+  toast.style.border = `1px solid ${borders[type] || '#e5e7eb'}`;
+  toast.style.borderLeft = `6px solid ${borders[type] || '#e5e7eb'}`;
+  toast.style.borderRadius = '12px';
+  toast.style.boxShadow = '0 10px 25px rgba(0,0,0,0.15)';
+  toast.style.padding = '12px 14px';
+  toast.style.minWidth = '280px';
+  toast.style.maxWidth = '420px';
+  toast.style.fontSize = '14px';
+  toast.style.lineHeight = '1.35';
+  toast.style.display = 'flex';
+  toast.style.gap = '10px';
+  toast.style.alignItems = 'flex-start';
+  toast.style.pointerEvents = 'auto';
+
+  toast.innerHTML = `
+    <div style="flex:1; white-space:pre-line;">${message}</div>
+    <button style="border:none; background:transparent; cursor:pointer; color:#6b7280; font-size:16px; line-height:1;">✕</button>
+  `;
+
+  const closeBtn = toast.querySelector('button');
+  closeBtn.addEventListener('click', () => toast.remove());
+
+  container.appendChild(toast);
+
+  if (timeoutMs > 0) {
+    setTimeout(() => {
+      if (toast.isConnected) toast.remove();
+    }, timeoutMs);
+  }
+}
+
+function reservationErrorMessage(code, httpStatus) {
+  const map = {
+    INVALID_DATA: "Completează toate câmpurile (spot, start, end).",
+    INVALID_DATETIME: "Format dată invalid.",
+    INVALID_TIMEFRAME: "Interval invalid: start trebuie să fie înainte de end.",
+    SPOT_NOT_FOUND: "Locul de parcare nu există.",
+    SPOT_OCCUPIED: "Locul este ocupat.",
+    SPOT_OVERLAP: "Locul este deja rezervat în acel interval.",
+    EXISTING_RESERVATION_OVERLAP: "Ai deja o rezervare activă în acel interval.",
+    NOT_FOUND: "Rezervarea nu există.",
+    FORBIDDEN: "Nu ai voie să modifici această rezervare.",
+    BAD_REQUEST: "Cerere invalidă."
+  };
+
+  return map[code] || `Eroare (${httpStatus})`;
+}
+
+// end of helpers
 
 function initMap() {
     map = L.map('map').setView([UPB_LAT, UPB_LNG], DEFAULT_ZOOM);
@@ -107,7 +296,7 @@ function addParkingLotPolygon(lot) {
                 const props = feature.properties;
                 const popupContent = `
                     <div class="parking-lot-popup">
-                        <h4>🏢 ${props.name}</h4>
+                        <h4>${props.name}</h4>
                         <p><strong>Total locuri:</strong> ${props.total_spots}</p>
                         <p><strong>Coloane:</strong> ${props.columns}</p>
                         <p><strong>ID Lot:</strong> ${props.id}</p>
@@ -149,10 +338,19 @@ function addParkingLotPolygon(lot) {
 }
 
 function getParkingStatus(spot) {
-    if (spot.reservation && spot.reservation.start_time && spot.reservation.end_time) {
-        return 'reserved';
-    } else if (spot.is_occupied) {
+
+    if (spot.is_occupied) {
         return 'occupied';
+    }
+
+    // add here !spot.is_occupied in the condition to not display the reservation interval
+    if (spot.reservation && spot.reservation.start_time && spot.reservation.end_time) {
+        // const now = new Date();
+        // const start = new Date(spot.reservation.start_time);
+        // const end = new Date(spot.reservation.end_time);
+        // if (start <= now && now < end) 
+        //     return 'reserved';
+        return 'reserved';
     } else {
         return 'free';
     }
@@ -228,13 +426,39 @@ function addParkingMarker(spot) {
             `;
         }
 
-        const buttonText = spot.is_occupied ? '❌ Eliberează' : '✅ Ocupă';
+        const buttonText = spot.is_occupied ? 'Eliberează' : 'Ocupă';
         const buttonClass = spot.is_occupied ? 'btn-danger' : 'btn-success';
         
         popupContent += `
                 <button class="btn ${buttonClass} btn-sm" onclick="toggleParkingSpot(${spot.id}, ${spot.is_occupied})">
                     ${buttonText}
                 </button>
+        `;
+
+        // Reservation buttons (add HERE, after occupy button, before closing </div>)
+        if (typeof isLoggedIn === "function" && isLoggedIn()) {
+            const myActive = (typeof getActiveReservationForSpot === "function")
+                ? getActiveReservationForSpot(spot.id)
+                : null;
+
+            if (myActive) {
+                popupContent += `
+                    <button class="btn btn-warning btn-sm" style="margin-left:6px;"
+                            onclick="cancelReservation(${myActive.id})">
+                        🟡 Anulează rezervarea
+                    </button>
+                `;
+            } else if (status === 'free' && !spot.is_occupied) {
+                popupContent += `
+                    <button class="btn btn-primary btn-sm" style="margin-left:6px;"
+                            onclick="reserveParkingSpot(${spot.id})">
+                        🗓️ Rezervă
+                    </button>
+                `;
+            }
+        }
+
+        popupContent += `
             </div>
         `;
 
@@ -305,13 +529,39 @@ function addParkingSpotPolygon(spot) {
                     `;
                 }
 
-                const buttonText = props.is_occupied ? '❌ Eliberează' : '✅ Ocupă';
+                const buttonText = props.is_occupied ? 'Eliberează' : 'Ocupă';
                 const buttonClass = props.is_occupied ? 'btn-danger' : 'btn-success';
                 
                 popupContent += `
                         <button class="btn ${buttonClass} btn-sm" onclick="toggleParkingSpot(${props.id}, ${props.is_occupied})">
                             ${buttonText}
                         </button>
+                `;
+
+                // Reservation buttons (add HERE, after occupy button, before closing </div>)
+                if (typeof isLoggedIn === "function" && isLoggedIn()) {
+                    const myActive = (typeof getActiveReservationForSpot === "function")
+                        ? getActiveReservationForSpot(spot.id)
+                        : null;
+
+                    if (myActive) {
+                        popupContent += `
+                            <button class="btn btn-warning btn-sm" style="margin-left:6px;"
+                                    onclick="cancelReservation(${myActive.id})">
+                                Anulează rezervarea
+                            </button>
+                        `;
+                    } else if (status === 'free' && !spot.is_occupied) {
+                        popupContent += `
+                            <button class="btn btn-primary btn-sm" style="margin-left:6px;"
+                                    onclick="reserveParkingSpot(${spot.id})">
+                                Rezervă
+                            </button>
+                        `;
+                    }
+                }
+
+                popupContent += `
                     </div>
                 `;
 
@@ -367,44 +617,252 @@ function toggleParkingSpot(spotId, currentStatus) {
             'Content-Type': 'application/json'
         }
     })
-    .then(response => {
+    .then( async (response) => {
+        const data = await response.json().catch(() => ({}));
+        
         if (response.status === 409) {
-            return response.json().then(data => {
-                alert('⚠️ ' + data.error);
-                return null;
-            });
+            // return response.json().then(data => {
+            //     alert(data.error); });
+            showToast(data?.error || 'Loc indisponibil.', 'warning');
+            return null;
+            
         }
         if (response.status === 403) {
-            alert('❌ Acest loc e ocupat de o altă persoană!');
+            // alert('Acest loc e ocupat de o altă persoană!');
+            showToast('Acest loc e ocupat de o altă persoană!', 'error');
             return null;
         }
         if (response.status === 401) {
-            alert('❌ Trebuie să te conectezi pentru a ocupa un loc!');
+            // alert('Trebuie să te conectezi pentru a ocupa un loc!');
+            showToast('Trebuie să te conectezi pentru a ocupa un loc!', 'error');
             return null;
         }
+
         if (!response.ok) {
-            throw new Error(`Eroare: ${response.status}`);
+            // throw new Error(`Eroare: ${response.status}`);
+            showToast(`Eroare la ocupare (${response.status})`, 'error');
+            return null;
         }
-        return response.json();
+        // return response.json();
+        return data;
     })
     .then(data => {
-        if (data) {
-            console.log('✅ Status loc actualizado:', data);
-            refreshParkingSpots();
+        if (!data) return;
+
+        // console.log('Status loc actualizat:', data);
+        // if (data.warning && data.warning.type === "UPCOMING_RESERVATION") {
+        //     alert(" " + data.warning.message);
+        // }
+        // refreshParkingSpots();
+        if (data.warning?.type === "UPCOMING_RESERVATION") {
+            showToast(data.warning.message, 'warning', 8000);
+        } else {
+            showToast('Status actualizat.', 'success', 2500);
         }
+
+        refreshParkingSpots();
     })
     .catch(error => {
         console.error('Eroare la toggle ocupare:', error);
-        alert('Eroare la actualizarea locului!');
+        showToast('Eroare la actualizarea locului!', 'error');
     });
 }
 
 function reserveParkingSpot(spotId) {
     console.log('Rezervare loc de parcare:', spotId);
     // TODO: Implementare logica pentru rezervare
-    alert('Funcționalitate de rezervare - spot #' + spotId);
+    // alert('Funcționalitate de rezervare - spot #' + spotId);
+
+    if (!isLoggedIn()) {
+        // ('Trebuie să te conectezi pentru a rezerva!');
+        showToast('Trebuie să te conectezi pentru a rezerva!', 'error');
+        return;
+    }
+
+    const spot = allParkingSpots.find(s => s.id === spotId);
+    
+    if (!spot) {
+        // alert('Spot invalid!');
+        showToast('Spot invalid!', 'error');
+        return;
+    }
+
+    // Prevent reserving occupied spot (optional rule)
+    if (spot.is_occupied) {
+        // alert('Locul este ocupat. Nu poți rezerva acum.');
+        showToast('Locul este ocupat. Nu poți rezerva acum.', 'warning');
+        return;
+    }
+
+    // If already reserved by you (active reservation), suggest cancel
+    const myActive = getActiveReservationForSpot(spotId);
+    if (myActive) {
+        // alert('Ai deja o rezervare activă pentru acest loc. Poți să o anulezi din popup sau din sidebar.');
+        showToast('Ai deja o rezervare activă pentru acest loc. O poți anula din popup sau din sidebar.', 'warning', 7000);
+        return;
+    }
+
+    openReservationModal(spotId, spot);
+
 }
 
+function openReservationModal(spotId, spot) {
+    selectedReserveSpotId = spotId;
+
+    const modal = document.getElementById('reservation-modal');
+    const startInput = document.getElementById('reserve-start');
+    const endInput = document.getElementById('reserve-end');
+    const hint = document.getElementById('reservation-modal-hint');
+
+    // Default: start in 5 minutes, end in 65 minutes
+    const now = new Date();
+    const start = new Date(now.getTime() + 5 * 60 * 1000);
+    const end = new Date(now.getTime() + 65 * 60 * 1000);
+
+    function toLocalDatetimeValue(d) {
+        const pad = (x) => String(x).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    startInput.value = toLocalDatetimeValue(start);
+    endInput.value = toLocalDatetimeValue(end);
+
+    hint.textContent = `Spot: ${spot.parking_lot} #${spot.spot_number || spot.id}`;
+
+    modal.style.display = 'block';
+}
+
+function closeReservationModal() {
+    const modal = document.getElementById('reservation-modal');
+    modal.style.display = 'none';
+    selectedReserveSpotId = null;
+}
+
+function submitReservationModal() {
+    if (!selectedReserveSpotId) return;
+
+    const startVal = document.getElementById('reserve-start').value;
+    const endVal = document.getElementById('reserve-end').value;
+
+    if (!startVal || !endVal) {
+        // alert('Completează start și end.');
+        showToast('Completează start și end.', 'warning');
+        return;
+    }
+
+    const payload = {
+        spot_id: selectedReserveSpotId,
+        start_time: isoFromDatetimeLocal(startVal),
+        end_time: isoFromDatetimeLocal(endVal)
+    };
+
+    fetch('/reservations/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+
+        if (res.status === 401) {
+            showToast('Trebuie să te conectezi pentru a rezerva!', 'error');
+            return null;
+        }
+        // if (res.status === 400) {
+        //     showToast('Date invalide (interval / format).', 'eroare');
+        //     return null;
+        // }
+        // if (res.status === 409) {
+        //     alert('Loc ocupat sau deja rezervat în interval.');
+        //     return null;
+        // }
+        if (!res.ok) {
+            const code = data?.error;
+            showToast(reservationErrorMessage(code, res.status), 'warning');
+            // alert(`Eroare la rezervare (${res.status})`);
+            return null;
+        }
+        return data;
+    })
+    .then((data) => {
+        if (!data) return;
+
+        // -----
+
+        const startIso = data.start_time || payload.start_time;
+        if (startIso) {
+            const start = new Date(startIso);
+            const deadline = new Date(start.getTime() + 15 * 60 * 1000);
+            showToast(
+            `Rezervare creată!\n\n` +
+            `Dacă nu ocupi locul în 15 minute de la ora de început a rezervării, aceasta se anulează automat.\n\n` +
+            `Trebuie să parchezi până la: ${deadline.toLocaleString('ro-RO')}`,
+            'warning',
+            9000
+            );
+      }
+
+        // -----
+
+        closeReservationModal();
+        // refresh reservations + spots (so reserved color updates)
+        return fetchMyReservations().then(() => refreshParkingSpots());
+    })
+    .catch(err => {
+        console.error('Eroare rezervare:', err);
+        showToast('Eroare la rezervare! Încearcă din nou.', 'error');
+    });
+}
+
+function cancelReservation(reservationId) {
+    if (!isLoggedIn()) {
+        // alert('Trebuie să te conectezi!');
+        showToast('Trebuie să te conectezi!', 'error');
+        return;
+    }
+
+    fetch(`/reservations/${reservationId}`, { method: 'DELETE' })
+        .then(async (res) => {
+            const data = await res.json().catch(() => ({}));
+
+            if (res.status === 401) {
+                // alert('Trebuie să te conectezi!');
+                showToast('Trebuie să te conectezi!', 'error');
+                return false;
+            }
+
+            // if (res.status === 403) {
+            //     alert('Nu ai voie să anulezi această rezervare!');
+            //     return false;
+            // }
+            // if (res.status === 404) {
+            //     alert('Rezervarea nu există.');
+            //     return false;
+            // }
+
+            if (!res.ok) {
+                // alert(`Eroare la anulare (${res.status})`);
+                const code = data?.error;
+                showToast(reservationErrorMessage(code, res.status), 'warning');
+                return false;
+            }
+
+            showToast('Rezervarea a fost anulată.', 'success', 4000);
+            return true;
+        })
+        .then((ok) => {
+            if (!ok) return;
+            return fetchMyReservations().then(() => refreshParkingSpots());
+        })
+        .catch(err => {
+            console.error('Eroare anulare rezervare:', err);
+            // alert('Eroare la anulare!');
+            showToast('Eroare la anulare! Încearcă din nou.', 'error');
+        });
+}
+
+
+// ------
 function centerMap(lat, lng, zoom = DEFAULT_ZOOM) {
     map.setView([lat, lng], zoom);
 }
@@ -419,6 +877,14 @@ document.addEventListener('DOMContentLoaded', function() {
     if (mapContainer && !map) {
         initMap();
         initializeFilters();
+        startAutoRefresh();
+
+        if (window.CURRENT_USER && window.CURRENT_USER.isAuthenticated) {
+            fetchMyReservations().then(() => {
+                // refresh spots so popups show correct reserve/cancel buttons
+                refreshParkingSpots();
+            });
+        }
     }
 });
 
@@ -500,4 +966,19 @@ function restoreFilters() {
             console.warn('Eroare la restaurarea filtrelor:', e);
         }
     }
+}
+
+let AUTO_REFRESH_MS = 5000; // 5s (pick 5–15s)
+
+function startAutoRefresh() {
+  setInterval(() => {
+    // This will fetch latest spots; since backend finalizes expired ones here,
+    // the yellow -> green/red transitions happen automatically.
+    refreshParkingSpots();
+
+    // Optional: also refresh reservation panels if you show them
+    if (window.CURRENT_USER?.isAuthenticated && typeof fetchMyReservations === "function") {
+      fetchMyReservations();
+    }
+  }, AUTO_REFRESH_MS);
 }

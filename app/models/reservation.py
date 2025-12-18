@@ -1,8 +1,7 @@
 """
 Modelul Reservation.
 
-TODO (Task 2):
-- Creează tabela `reservations` cu câmpurile:
+- Strcutura tabelei `reservations`:
     - id: INTEGER, PK, auto-increment
     - user_id: INTEGER, FK -> users.id
     - spot_id: INTEGER, FK -> parking_spots.id
@@ -42,62 +41,5 @@ class Reservation(db.Model):
     user = db.relationship("User", back_populates="reservations")
     #  1 parking_spot -> N reservations
     # Comentat pentru acum - va fi activat când ParkingSpot va avea relația back_populates
-    # spot = db.relationship("ParkingSpot", back_populates="reservations")
+    spot = db.relationship("ParkingSpot", back_populates="reservations")
     
-    # def is_valid_timeframe(self):
-    #     """Check if timeframe is logical."""
-    #     return self.start_time < self.end_time
-    
-    # @staticmethod
-    # def overlaps(spot_id, start, end):
-    #     """Check if the requested time interval overlaps with existing reservations."""
-    #     return Reservation.query.filter(
-    #         Reservation.spot_id == spot_id,
-    #         Reservation.status == "active",  # only active reservations matter
-    #         and_(
-    #             Reservation.start_time < end,
-    #             Reservation.end_time > start
-    #         )
-    #     ).first()
-
-    # @staticmethod
-    # def create_reservation(user, spot, start, end):
-    #     """Create reservation with full validation."""
-    #     # 1. Time check
-    #     if start >= end:
-    #         raise ValueError("Start time must be before end time.")
-
-    #     # 2. Check overlapping reservations
-    #     if Reservation.overlaps(spot.id, start, end):
-    #         raise ValueError("Spot is already reserved in this timeframe.")
-
-    #     # 3. Create and save
-    #     reservation = Reservation(
-    #         user_id=user.id,
-    #         spot_id=spot.id,
-    #         start_time=start,
-    #         end_time=end,
-    #         status="active"
-    #     )
-
-    #     db.session.add(reservation)
-    #     db.session.commit()
-    #     return reservation
-    
-    # def cancel(self):
-    #     """Cancel a reservation."""
-    #     if self.status != "active":
-    #         raise ValueError("Reservation is already canceled.")
-
-    #     self.status = "cancelled"
-    #     db.session.commit()
-
-    # @staticmethod
-    # def get_user_reservations(user_id):
-    #     """Return all reservations of an user."""
-    #     return Reservation.query.filter_by(user_id=user_id).order_by(Reservation.start_time.desc()).all()
-    
-    # @staticmethod
-    # def get_spot_reservations(spot_id):
-    #     """Return all reservations for a parking spot."""
-    #     return Reservation.query.filter_by(spot_id=spot_id).order_by(Reservation.start_time.desc()).all()

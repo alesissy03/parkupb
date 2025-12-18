@@ -1,8 +1,7 @@
 """
 Modelul ParkingLot.
 
-TODO (Task 2):
-- Creează tabela `parking_lots` cu câmpurile:
+- Structura tabelei `parking_lots`:
     - id: INTEGER, PK, auto-increment
     - name: VARCHAR (ex: "Parcare Cămin A"), not null
     - campus_zone: VARCHAR (ex: "Nord", "Sud"), opțional
@@ -21,8 +20,6 @@ from ..extensions import db
 class ParkingLot(db.Model):
     __tablename__ = "parking_lots"
 
-    # TODO (Task 2): definește coloanele conform documentației
-
     # Salvare colturi
     # Stanga sus, dreapta sus, dreapta jos, stanga jos
     id = db.Column(db.Integer, primary_key=True)
@@ -34,14 +31,14 @@ class ParkingLot(db.Model):
     columns = db.Column(db.Integer, nullable=True)
     polygon_geojson = db.Column(db.Text, nullable=True)
 
-    # TODO (Task 6): definește relația `spots` = db.relationship("ParkingSpot", ...)
+    # TODO (Task 6): definește relația `spots` = db.relationship("ParkingSpot", ...) : did it
     # Comentat pentru acum - va fi activat când vom folosi lot_id în ParkingSpot
-    # parking_spots = db.relationship(
-    #     "ParkingSpot",
-    #     back_populates="lot",
-    #     cascade="all, delete-orphan",
-    #     lazy="select",
-    # )
+    spots = db.relationship(
+        "ParkingSpot",
+        back_populates="lot",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
 
     def __repr__(self):
         return f"<ParkingLot  {self.name}>"

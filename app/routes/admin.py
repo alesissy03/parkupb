@@ -158,6 +158,7 @@ def create_parking_lot():
         }
 
         spot = ParkingSpot(
+            lot_id = lot.id, # ne rugam sa nu crape
             parking_lot=lot.name,
             spot_number=str(idx + 1),
             latitude=lat,

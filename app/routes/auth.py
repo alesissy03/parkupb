@@ -29,7 +29,7 @@ def register():
     full_name = data["full_name"].strip()
     role = data.get("role", "student")
 
-    if "@upb" not in email:
+    if "upb" not in email:
         return jsonify({
             "error": "INVALID_EMAIL",
             "message": "Email-ul trebuie să conțină domeniul @upb."

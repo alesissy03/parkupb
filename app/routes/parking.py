@@ -6,8 +6,10 @@ TODO (Task 8):
 """
 from flask import Blueprint, jsonify, request
 from flask_login import login_required, current_user
-from app.models import ParkingSpot, ParkingLot
+from app.models import ParkingSpot, ParkingLot, Reservation
 from app.extensions import db
+from app.services.reservation_service import finalize_expired_reservations, cancel_no_show_reservations
+from datetime import datetime
 
 parking_bp = Blueprint("parking", __name__)
 
@@ -203,6 +205,8 @@ def manage_spots():
     """
     if request.method == "GET":
         try:
+            finalize_expired_reservations()
+            cancel_no_show_reservations()
             spots = ParkingSpot.query.all()
             return jsonify([spot.to_dict() for spot in spots]), 200
         except Exception as e:
@@ -286,21 +290,91 @@ def toggle_spot_occupancy(spot_id):
     """
     spot = ParkingSpot.query.get_or_404(spot_id)
 
+    finalize_expired_reservations()
+    cancel_no_show_reservations()
+
+    now = datetime.now()
+
     # Daca locul e liber, il poate ocupa oricine
     if not spot.is_occupied:
         # Verifica daca utilizatorul ocupa deja alt loc
+        # occupied_spots = ParkingSpot.query.filter_by(
+        #     occupied_by_email=current_user.email,
+        #     is_occupied=True
+        # ).first()
+        
+        # if occupied_spots:
+        #     return jsonify({
+        #         'error': f'Ocupi deja locul {occupied_spots.parking_lot} #{occupied_spots.spot_number}. Eliberează-l înainte de a ocupa altul!'
+        #     }), 409
+        
+        # spot.is_occupied = True
+        # spot.occupied_by_email = current_user.email
+        active_res = (
+            Reservation.query
+            .filter(
+                Reservation.spot_id == spot.id,
+                Reservation.status == "active",
+                Reservation.start_time <= now,
+                Reservation.end_time > now,
+            )
+            .order_by(Reservation.start_time.asc())
+            .first()
+        )
+
+        if active_res and active_res.user_id != current_user.id and getattr(current_user, "role", None) != "admin":
+            return jsonify({
+                "error": "RESERVED_FOR_ANOTHER_USER",
+                "message": "Loc rezervat: doar persoana care a făcut rezervarea poate parca acum.",
+                "reservation": {
+                    "start_time": active_res.start_time.isoformat(),
+                    "end_time": active_res.end_time.isoformat(),
+                }
+            }), 403
+
+        # daca urmeaza o rezervare, permite altui user sa parcheze, dar primeste un warning
+        upcoming_res = (
+            Reservation.query
+            .filter(
+                Reservation.spot_id == spot.id,
+                Reservation.status == "active",
+                Reservation.start_time > now,
+            )
+            .order_by(Reservation.start_time.asc())
+            .first()
+        )
+
+        # existing “one occupied spot per user” check
         occupied_spots = ParkingSpot.query.filter_by(
             occupied_by_email=current_user.email,
             is_occupied=True
         ).first()
-        
         if occupied_spots:
             return jsonify({
                 'error': f'Ocupi deja locul {occupied_spots.parking_lot} #{occupied_spots.spot_number}. Eliberează-l înainte de a ocupa altul!'
             }), 409
-        
+
         spot.is_occupied = True
         spot.occupied_by_email = current_user.email
+        db.session.commit()
+
+        payload = {
+            'success': True,
+            'spot_id': spot.id,
+            'is_occupied': spot.is_occupied,
+            'occupied_by_email': spot.occupied_by_email
+        }
+
+        if upcoming_res:
+            payload["warning"] = {
+                "type": "UPCOMING_RESERVATION",
+                "message": f"Acest loc are o rezervare la {upcoming_res.start_time.isoformat()}. Te rugăm să eliberezi înainte de start.",
+                "must_leave_before": upcoming_res.start_time.isoformat(),
+                "reservation_end": upcoming_res.end_time.isoformat(),
+            }
+
+        return jsonify(payload), 200
+
     else:
         # Daca e ocupat, doar ocupantul poate elibera
         if spot.occupied_by_email != current_user.email:

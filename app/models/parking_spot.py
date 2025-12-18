@@ -1,6 +1,6 @@
 """
 Modelul ParkingSpot.
-- Creează tabela `parking_spots` cu câmpurile:
+- Structura tabelei `parking_spots`:
     - id: INTEGER, PK, auto-increment
     - lot_id: INTEGER, FK -> parking_lots.id
     - spot_number: VARCHAR / INTEGER (ex: 1, 2, "A23")
@@ -9,7 +9,7 @@ Modelul ParkingSpot.
     - last_status_change: DATETIME (ultima schimbare de status)
     - polygon_geojson: TEXT (geometria locului în format GeoJSON)
 - Relația many-to-one cu ParkingLot (parking_spot.lot).
-TODO (Task 9):
+TODO (Task 9): i did it
 - Relația one-to-many cu Reservation (spot.reservations).
 """
 
@@ -22,6 +22,11 @@ class ParkingSpot(db.Model):
     __tablename__ = "parking_spots"
 
     id = db.Column(db.Integer, primary_key=True)
+
+    # NEW: real relation to ParkingLot
+    lot_id = db.Column(db.Integer, db.ForeignKey("parking_lots.id"), nullable=True)
+    lot = db.relationship("ParkingLot", back_populates="spots")
+
     parking_lot = db.Column(db.String(100), nullable=False)  # Numele locului de parcare
     spot_number = db.Column(db.String(20), nullable=True)  # Numărul/ID-ul locului în cadrul parcării (ex: 1, A12)
     latitude = db.Column(db.Float, nullable=False)  # Coordonata latitudine
@@ -36,6 +41,13 @@ class ParkingSpot(db.Model):
     
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    reservations = db.relationship(
+        "Reservation",
+        back_populates="spot",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
 
     def __repr__(self):
         return f"<ParkingSpot {self.parking_lot} ({self.id})>"
@@ -68,4 +80,4 @@ class ParkingSpot(db.Model):
     def set_status(self, new_status: str):
         """Utilitar pentru a actualiza statusul și timestamp-ul"""
         self.current_status = new_status
-        self.last_status_change = datetime.utcnow()
+        self.last_status_change = datetime.now()
