@@ -7,7 +7,7 @@ from app.models import ParkingSpot, User
 from datetime import datetime
 
 def _now():
-    return datetime.utcnow()
+    return datetime.now()
 
 def get_all_spots(parking_lot : str):
     query = ParkingSpot.query

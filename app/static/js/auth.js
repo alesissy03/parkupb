@@ -143,7 +143,7 @@ async function handleLogout(event) {
         const data = await response.json();
         
         if (response.ok) {
-            console.log('✅ Logout reușit');
+            console.log('Logout reușit');
             window.location.href = '/';
         } else {
             console.error('Eroare la logout:', data.message);
