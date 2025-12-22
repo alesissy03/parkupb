@@ -7,11 +7,26 @@ const UPB_LAT = 44.439611824934026;
 const UPB_LNG = 26.0492114360659;
 const DEFAULT_ZOOM = 16;
 
+// Variabile pentru rutare
+let routeControl = null;
+let routeMarkers = []; // optional
+
+// Coordonatele intrării în campus
+const CAMPUS_GATE_LAT = 44.434583;
+const CAMPUS_GATE_LNG = 26.045166;
+let hasShownRoutePrivacyHint = false;  // flag
+
 let map = null;
 let markers = [];
 let parkingLotPolygons = [];
+let routingCancelWrapper = null;
 
-let myReservations = [];     // loaded from /reservation/my
+let myReservations = [];     // încărcat din /reservation/my
+let myReservationsTotal = 0;        // total count from backend
+let showFullReservationHistory = false;
+
+const RESERVATION_HISTORY_LIMIT = 5;
+
 let selectedReserveSpotId = null;
 
 const MARKER_COLORS = {
@@ -33,7 +48,7 @@ function isLoggedIn() {
 }
 
 function isoFromDatetimeLocal(value) {
-    // "YYYY-MM-DDTHH:MM" is accepted by datetime.fromisoformat
+    // "YYYY-MM-DDTHH:MM" e acceptat de datetime.fromisoformat
     return value;
 }
 
@@ -46,26 +61,34 @@ function formatDateRO(iso) {
 }
 
 function getActiveReservationForSpot(spotId) {
-    // "active" means not cancelled/finished; service may mark finished automatically
+    // "active" înseamnă not cancelled/finished
     return myReservations.find(r => r.spot_id === spotId && r.status === "active") || null;
 }
 
-function fetchMyReservations() {
+function fetchMyReservations({ forceFull = false } = {}) {
     if (!isLoggedIn()) return Promise.resolve([]);
 
-    return fetch('/reservations/my')
+     // Decide what to load
+    const wantFull = forceFull || showFullReservationHistory;
+    const limit = wantFull ? 1000 : RESERVATION_HISTORY_LIMIT; // "enough" instead of infinity
+    const offset = 0;
+
+    return fetch(`/reservations/my?limit=${limit}&offset=${offset}`)
         .then(res => {
-            if (res.status === 401) return [];
+            if (res.status === 401) return { total: 0, items: [] };
             if (!res.ok) throw new Error(`API error: ${res.status}`);
             return res.json();
         })
         .then(data => {
-            myReservations = Array.isArray(data) ? data : [];
+            myReservationsTotal = Number(data?.total || 0);
+            myReservations = Array.isArray(data?.items) ? data.items : [];
+
             renderReservationSidebar();
             return myReservations;
         })
         .catch(err => {
             console.warn('Eroare la incarcarea rezervarilor:', err);
+            myReservationsTotal = 0;
             myReservations = [];
             renderReservationSidebar();
             return [];
@@ -89,7 +112,7 @@ function renderReservationSidebar() {
         return;
     }
 
-    // Current = first active reservation by start_time (closest upcoming/current)
+    // Current = prima rezervare activă începând cu start_time (closest upcoming/current)
     const active = myReservations
         .filter(r => r.status === "active")
         .sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
@@ -107,111 +130,369 @@ function renderReservationSidebar() {
         currentEl.innerHTML = `<div class="no-reservation"><p>Nu ai nicio rezervare activă</p></div>`;
     }
 
-    // Full history
-    const rows = myReservations
-        .slice()
-        .sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
-        .map(r => `
-          <div style="padding:8px 0; border-bottom:1px solid rgba(0,0,0,0.06);">
-            <div style="display:flex; justify-content:space-between; gap:10px;">
-              <div>
-                <div><strong>#${r.spot_id}</strong> <span style="opacity:0.7;">(${r.status})</span></div>
-                <div style="font-size:12px; opacity:0.75;">${formatDateRO(r.start_time)} → ${formatDateRO(r.end_time)}</div>
-              </div>
-              <div style="text-align:right;">
-                ${r.status === "active" ? `<button class="btn btn-danger btn-sm" onclick="cancelReservation(${r.id})">Anulează</button>` : ``}
-              </div>
-            </div>
-          </div>
-        `)
-        .join('');
+    // tot istoricul
+    // const rows = myReservations
+    //     .slice()
+    //     .sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
+    //     .map(r => `
+    //       <div style="padding:8px 0; border-bottom:1px solid rgba(0,0,0,0.06);">
+    //         <div style="display:flex; justify-content:space-between; gap:10px;">
+    //           <div>
+    //             <div><strong>#${r.spot_id}</strong> <span style="opacity:0.7;">(${r.status})</span></div>
+    //             <div style="font-size:12px; opacity:0.75;">${formatDateRO(r.start_time)} → ${formatDateRO(r.end_time)}</div>
+    //           </div>
+    //           <div style="text-align:right;">
+    //             ${r.status === "active" ? `<button class="btn btn-danger btn-sm" onclick="cancelReservation(${r.id})">Anulează</button>` : ``}
+    //           </div>
+    //         </div>
+    //       </div>
+    //     `)
+    //     .join('');
 
-    historyEl.innerHTML = rows || `<div class="empty-state"><p>Nu ai rezervări</p></div>`;
+    // historyEl.innerHTML = rows || `<div class="empty-state"><p>Nu ai rezervări</p></div>`;
+
+    // ultimele 5 rezervări + buton pentru înterg istoricul
+    const sorted = myReservations
+    .slice()
+    .sort((a, b) => new Date(b.start_time) - new Date(a.start_time));
+
+    const rows = sorted
+    .map(r => `
+        <div style="padding:8px 0; border-bottom:1px solid rgba(0,0,0,0.06);">
+        <div style="display:flex; justify-content:space-between; gap:10px;">
+            <div>
+            <div><strong>#${r.spot_id}</strong> <span style="opacity:0.7;">(${r.status})</span></div>
+            <div style="font-size:12px; opacity:0.75;">${formatDateRO(r.start_time)} → ${formatDateRO(r.end_time)}</div>
+            </div>
+            <div style="text-align:right;">
+            ${r.status === "active" ? `<button class="btn btn-danger btn-sm" onclick="cancelReservation(${r.id})">Anulează</button>` : ``}
+            </div>
+        </div>
+        </div>
+    `)
+    .join('');
+
+    // afiseaza butonul "Vezi toate" doar daca numărul total de rezervări > 5
+    let footer = '';
+    if (myReservationsTotal > RESERVATION_HISTORY_LIMIT) {
+    footer = `
+        <div style="margin-top:10px; display:flex; justify-content:center;">
+        <button class="btn btn-secondary btn-sm" onclick="toggleReservationHistory()">
+            ${showFullReservationHistory ? 'Arată mai puțin' : `Vezi toate (${myReservationsTotal})`}
+        </button>
+        </div>
+    `;
+    }
+
+    historyEl.innerHTML = (rows ? rows + footer : `<div class="empty-state"><p>Nu ai rezervări</p></div>`);
 }
 
 function showToast(message, type = 'info', timeoutMs = 5000) {
-  const container = document.getElementById('toast-container');
+    const container = document.getElementById('toast-container');
 
-  if (!container) {
-    // fallback if container missing
-    // alert(message);
-    console.warn("toast-container missing:", message);
-    return;
-  }
+    if (!container) {
+        // fallback dacă container-ul lipsește
+        console.warn("toast-container missing:", message);
+        return;
+    }
 
-  const colors = {
-    info:  '#ffffff',
-    success: '#ffffff',
-    warning: '#ffffff',
-    error: '#ffffff'
-  };
+    const colors = {
+        info:  '#ffffff',
+        success: '#ffffff',
+        warning: '#ffffff',
+        error: '#ffffff'
+    };
 
-  const borders = {
-    info:   '#3b82f6',
-    success:'#22c55e',
-    warning:'#f59e0b',
-    error:  '#ef4444'
-  };
+    const borders = {
+        info:   '#3b82f6',
+        success:'#22c55e',
+        warning:'#f59e0b',
+        error:  '#ef4444'
+    };
 
-//   const icons = {
-//     info: 'ℹ️',
-//     success: '✅',
-//     warning: '⚠️',
-//     error: '❌'
-//   };
+    const toast = document.createElement('div');
+    toast.style.background = colors[type] || '#fff';
+    toast.style.color = '#111827';
+    toast.style.border = `1px solid ${borders[type] || '#e5e7eb'}`;
+    toast.style.borderLeft = `6px solid ${borders[type] || '#e5e7eb'}`;
+    toast.style.borderRadius = '12px';
+    toast.style.boxShadow = '0 10px 25px rgba(0,0,0,0.15)';
+    toast.style.padding = '12px 14px';
+    toast.style.minWidth = '280px';
+    toast.style.maxWidth = '420px';
+    toast.style.fontSize = '14px';
+    toast.style.lineHeight = '1.35';
+    toast.style.display = 'flex';
+    toast.style.gap = '10px';
+    toast.style.alignItems = 'flex-start';
+    toast.style.pointerEvents = 'auto';
 
-  const toast = document.createElement('div');
-  toast.style.background = colors[type] || '#fff';
-  toast.style.color = '#111827';
-  toast.style.border = `1px solid ${borders[type] || '#e5e7eb'}`;
-  toast.style.borderLeft = `6px solid ${borders[type] || '#e5e7eb'}`;
-  toast.style.borderRadius = '12px';
-  toast.style.boxShadow = '0 10px 25px rgba(0,0,0,0.15)';
-  toast.style.padding = '12px 14px';
-  toast.style.minWidth = '280px';
-  toast.style.maxWidth = '420px';
-  toast.style.fontSize = '14px';
-  toast.style.lineHeight = '1.35';
-  toast.style.display = 'flex';
-  toast.style.gap = '10px';
-  toast.style.alignItems = 'flex-start';
-  toast.style.pointerEvents = 'auto';
+    toast.innerHTML = `
+        <div style="flex:1; white-space:pre-line;">${message}</div>
+        <button style="border:none; background:transparent; cursor:pointer; color:#6b7280; font-size:16px; line-height:1;">✕</button>
+    `;
 
-  toast.innerHTML = `
-    <div style="flex:1; white-space:pre-line;">${message}</div>
-    <button style="border:none; background:transparent; cursor:pointer; color:#6b7280; font-size:16px; line-height:1;">✕</button>
-  `;
+    const closeBtn = toast.querySelector('button');
+    closeBtn.addEventListener('click', () => toast.remove());
 
-  const closeBtn = toast.querySelector('button');
-  closeBtn.addEventListener('click', () => toast.remove());
+    container.appendChild(toast);
 
-  container.appendChild(toast);
-
-  if (timeoutMs > 0) {
-    setTimeout(() => {
-      if (toast.isConnected) toast.remove();
-    }, timeoutMs);
-  }
+    if (timeoutMs > 0) {
+        setTimeout(() => {
+        if (toast.isConnected) toast.remove();
+        }, timeoutMs);
+    }
 }
 
 function reservationErrorMessage(code, httpStatus) {
-  const map = {
-    INVALID_DATA: "Completează toate câmpurile (spot, start, end).",
-    INVALID_DATETIME: "Format dată invalid.",
-    INVALID_TIMEFRAME: "Interval invalid: start trebuie să fie înainte de end.",
-    SPOT_NOT_FOUND: "Locul de parcare nu există.",
-    SPOT_OCCUPIED: "Locul este ocupat.",
-    SPOT_OVERLAP: "Locul este deja rezervat în acel interval.",
-    EXISTING_RESERVATION_OVERLAP: "Ai deja o rezervare activă în acel interval.",
-    NOT_FOUND: "Rezervarea nu există.",
-    FORBIDDEN: "Nu ai voie să modifici această rezervare.",
-    BAD_REQUEST: "Cerere invalidă."
-  };
+    const map = {
+        INVALID_DATA: "Completează toate câmpurile (spot, start, end).",
+        INVALID_DATETIME: "Format dată invalid.",
+        INVALID_TIMEFRAME: "Interval invalid: start trebuie să fie înainte de end.",
+        SPOT_NOT_FOUND: "Locul de parcare nu există.",
+        SPOT_OCCUPIED: "Locul este ocupat.",
+        SPOT_OVERLAP: "Locul este deja rezervat în acel interval.",
+        EXISTING_RESERVATION_OVERLAP: "Ai deja o rezervare activă în acel interval.",
+        NOT_FOUND: "Rezervarea nu există.",
+        FORBIDDEN: "Nu ai voie să modifici această rezervare.",
+        BAD_REQUEST: "Cerere invalidă."
+    };
 
-  return map[code] || `Eroare (${httpStatus})`;
+    return map[code] || `Eroare (${httpStatus})`;
 }
 
+function toggleReservationHistory() {
+    showFullReservationHistory = !showFullReservationHistory;
+
+    // When user expands, fetch full history once
+    return fetchMyReservations({ forceFull: showFullReservationHistory });
+}
+
+function isRouteActive() {
+  if (!routeControl) return false;
+
+  // If you use markers for route, easiest check:
+  if (routeMarkers && routeMarkers.length > 0) return true;
+
+  // Also check waypoints (LRM stores waypoints even after set)
+  try {
+    const wps = routeControl.getWaypoints?.() || [];
+    return wps.filter(w => w && w.latLng).length >= 2;
+  } catch (e) {
+    return false;
+  }
+}
+
+function isRoutingPanelExpanded() {
+  if (!routeControl) return false;
+  const c = routeControl.getContainer?.();
+  if (!c) return false;
+  return !c.classList.contains("leaflet-routing-container-hide");
+}
+
+function updateCancelButtonVisibility() {
+  // show only if route exists AND panel is expanded
+  const shouldShow = isRouteActive() && isRoutingPanelExpanded();
+  setRoutingCancelVisible(shouldShow);
+}
+
+function ensureRoutingCancelButton(position = "top") {
+    if (!routeControl) return;
+
+    const container = routeControl.getContainer?.();
+    if (!container) return;
+
+    // Already created
+    if (routingCancelWrapper) return;
+
+    const wrapper = document.createElement("div");
+    wrapper.style.margin = "8px";
+    wrapper.style.display = "none"; // hidden until a route exists
+    wrapper.style.textAlign = "center";
+    wrapper.style.width = "calc(100% - 16px)";
+
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-outline-secondary btn-sm";
+    btn.textContent = "Anulează afișarea rutei";
+    btn.style.width = "100%";
+    btn.style.whiteSpace = "nowrap";
+    btn.onclick = () => clearRoute();
+
+    wrapper.appendChild(btn);
+
+    // IMPORTANT: don't let clicks on the button move/zoom the map
+    if (window.L && L.DomEvent) {
+        L.DomEvent.disableClickPropagation(wrapper);
+        L.DomEvent.disableScrollPropagation(wrapper);
+    }
+
+    // Place it where you want:
+    // "top" = above instructions
+    // "bottom" = below instructions
+    if (position === "top") {
+        container.insertBefore(wrapper, container.firstChild);
+    } else {
+        container.appendChild(wrapper);
+    }
+
+    routingCancelWrapper = wrapper;
+
+    // --- sync cancel button with panel collapse/expand ---
+    const collapseBtn = container.querySelector(".leaflet-routing-collapse-btn");
+    if (collapseBtn && !collapseBtn.dataset.cancelHooked) {
+    collapseBtn.dataset.cancelHooked = "1";
+    collapseBtn.addEventListener("click", () => {
+        // wait for LRM to toggle class
+        setTimeout(updateCancelButtonVisibility, 0);
+    });
+    }
+
+    // Watch container class changes (best + works even if LRM changes DOM)
+    if (!container.dataset.cancelObserver) {
+    container.dataset.cancelObserver = "1";
+    const obs = new MutationObserver(() => updateCancelButtonVisibility());
+    obs.observe(container, { attributes: true, attributeFilter: ["class"] });
+    }
+
+    // initial sync
+    updateCancelButtonVisibility();
+}
+
+function setRoutingCancelVisible(visible) {
+    if (!routingCancelWrapper) return;
+    routingCancelWrapper.style.display = visible ? "block" : "none";
+}
+
+
 // end of helpers
+
+// funcții pentru rutare
+
+function initRouting() {
+    if (!window.L || !L.Routing) {
+      console.warn("Leaflet Routing Machine not loaded (L.Routing missing).");
+      return;
+    }
+
+    routeControl = L.Routing.control({
+        waypoints: [],
+        addWaypoints: false,
+        draggableWaypoints: true,
+        routeWhileDragging: true,
+        fitSelectedRoutes: true,
+        collapsible: true,
+        show: true,
+        router: L.Routing.osrmv1({
+            serviceUrl: "https://router.project-osrm.org/route/v1"
+        })
+    }).addTo(map);
+
+    // adaugă butonul de anulare a rutării
+    ensureRoutingCancelButton("top");
+
+    // verifică că butonul apare doar dacă rutarea e activă
+    // routeControl.on("routesfound", () => setRoutingCancelVisible(true));
+    // routeControl.on("routingerror", () => setRoutingCancelVisible(isRouteActive()));
+    // routeControl.on("waypointschanged", () => setRoutingCancelVisible(isRouteActive()));
+
+    routeControl.on("routesfound", updateCancelButtonVisibility);
+    routeControl.on("routingerror", updateCancelButtonVisibility);
+    routeControl.on("waypointschanged", updateCancelButtonVisibility);
+    console.log("Rutare initializata.");
+}
+
+function routeFromGateTo(lat, lng) {
+    if (!routeControl) initRouting();
+    if (!routeControl) {
+        // alert("Routing is not initialized.");
+        showToast("Routing nu este inițializat.", "error");
+        return;
+    }
+
+    const start = L.latLng(CAMPUS_GATE_LAT, CAMPUS_GATE_LNG);
+    const dest = L.latLng(lat, lng);
+
+    routeControl.setWaypoints([start, dest]);
+    updateCancelButtonVisibility();
+
+    // Optional: show markers
+    routeMarkers.forEach(m => map.removeLayer(m));
+    routeMarkers = [
+        L.marker(start).addTo(map).bindPopup("Poartă campus").openPopup(),
+        L.marker(dest).addTo(map).bindPopup("Destinație")
+    ];
+}
+
+
+function routeFromMyLocationTo(lat, lng) {
+    if (!routeControl) initRouting();
+    if (!routeControl) {
+        // alert("Routing is not initialized.");
+        showToast("Routing nu este inițializat.", "error");
+        return;
+    }
+
+    const dest = L.latLng(lat, lng);
+
+    if (!navigator.geolocation) {
+        showToast("Geolocation nu poate fi utilizat. Afișez ruta de la poarta campusului.", "warning", 6000);
+        routeFromGateTo(lat, lng);
+        return;
+    }
+
+    if (!hasShownRoutePrivacyHint) {
+        hasShownRoutePrivacyHint = true;
+        showToast(
+            "Pentru ruta optimă folosesc locația ta.\n" +
+            "Dacă nu permiți accesul, îți arăt ruta de la poarta campusului către locul de parcare.",
+            "info",
+            7000
+        );
+    }
+
+    navigator.geolocation.getCurrentPosition(
+        (pos) => {
+        const start = L.latLng(pos.coords.latitude, pos.coords.longitude);
+        routeControl.setWaypoints([start, dest]);
+        updateCancelButtonVisibility();
+
+        // Optional: show markers
+        routeMarkers.forEach(m => map.removeLayer(m));
+        routeMarkers = [
+            L.marker(start).addTo(map).bindPopup("Locația mea").openPopup(),
+            L.marker(dest).addTo(map).bindPopup("Destinație")
+        ];
+
+        console.log("Route set:", start, "->", dest);
+        },
+        (err) => {
+            console.warn("Geolocation error:", err);
+            // dacă utilizatorul nu permite accesul la locația sa,
+            // atunci îi arătăm ruta de la intrarea în campus către locul de parcare
+            showToast("Nu ai oferit acces la locație. Afișez ruta de la poarta campusului.", "warning", 6000);
+            routeFromGateTo(lat, lng);
+        },
+        { enableHighAccuracy: true, timeout: 8000 }
+    );
+
+}
+
+function clearRoute() {
+    if (routeControl) {
+        routeControl.setWaypoints([]);
+
+        // if (typeof routeControl.hide === "function") routeControl.hide();
+        // else routeControl.getContainer()?.classList.add("leaflet-routing-container-hide");
+
+    } 
+    routeMarkers.forEach(m => map.removeLayer(m));
+    routeMarkers = [];
+    updateCancelButtonVisibility();
+}
+
+// sfarsit functii pentru rutare
 
 function initMap() {
     map = L.map('map').setView([UPB_LAT, UPB_LNG], DEFAULT_ZOOM);
@@ -220,6 +501,9 @@ function initMap() {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         maxZoom: 19,
     }).addTo(map);
+
+    // pentru rutare
+    initRouting();
 
     const upbMarker = L.marker([UPB_LAT, UPB_LNG], {
         title: 'UPB - Universitatea Politehnica București'
@@ -343,13 +627,7 @@ function getParkingStatus(spot) {
         return 'occupied';
     }
 
-    // add here !spot.is_occupied in the condition to not display the reservation interval
     if (spot.reservation && spot.reservation.start_time && spot.reservation.end_time) {
-        // const now = new Date();
-        // const start = new Date(spot.reservation.start_time);
-        // const end = new Date(spot.reservation.end_time);
-        // if (start <= now && now < end) 
-        //     return 'reserved';
         return 'reserved';
     } else {
         return 'free';
@@ -435,7 +713,7 @@ function addParkingMarker(spot) {
                 </button>
         `;
 
-        // Reservation buttons (add HERE, after occupy button, before closing </div>)
+        // Reservation buttons
         if (typeof isLoggedIn === "function" && isLoggedIn()) {
             const myActive = (typeof getActiveReservationForSpot === "function")
                 ? getActiveReservationForSpot(spot.id)
@@ -445,17 +723,41 @@ function addParkingMarker(spot) {
                 popupContent += `
                     <button class="btn btn-warning btn-sm" style="margin-left:6px;"
                             onclick="cancelReservation(${myActive.id})">
-                        🟡 Anulează rezervarea
+                        Anulează rezervarea
                     </button>
                 `;
             } else if (status === 'free' && !spot.is_occupied) {
                 popupContent += `
                     <button class="btn btn-primary btn-sm" style="margin-left:6px;"
                             onclick="reserveParkingSpot(${spot.id})">
-                        🗓️ Rezervă
+                        Rezervă
                     </button>
                 `;
             }
+        }
+
+        // ROUTING buttons
+        popupContent += `
+            <div style="margin-top:10px; display:flex; gap:6px; flex-wrap:wrap;">
+                <button class="btn btn-outline-primary btn-sm"
+                        onclick="routeFromMyLocationTo(${spot.latitude}, ${spot.longitude})">
+                    Vezi ruta din locația ta
+                </button>
+
+                <button class="btn btn-outline-secondary btn-sm"
+                        onclick="routeFromGateTo(${spot.latitude}, ${spot.longitude})">
+                    Vezi ruta de la intrare
+                </button>
+            </div>
+        `;
+
+        if (isRouteActive()) {
+        popupContent += `
+            <button class="btn btn-outline-secondary btn-sm"
+                    onclick="clearRoute()">
+                Anulează afișarea rutei
+            </button>
+        `;
         }
 
         popupContent += `
@@ -538,7 +840,7 @@ function addParkingSpotPolygon(spot) {
                         </button>
                 `;
 
-                // Reservation buttons (add HERE, after occupy button, before closing </div>)
+                // Reservation buttons
                 if (typeof isLoggedIn === "function" && isLoggedIn()) {
                     const myActive = (typeof getActiveReservationForSpot === "function")
                         ? getActiveReservationForSpot(spot.id)
@@ -559,6 +861,30 @@ function addParkingSpotPolygon(spot) {
                             </button>
                         `;
                     }
+                }
+
+                // Routing buttons
+                popupContent += `
+                    <div style="margin-top:10px; display:flex; gap:6px; flex-wrap:wrap;">
+                        <button class="btn btn-outline-primary btn-sm"
+                                onclick="routeFromMyLocationTo(${spot.latitude}, ${spot.longitude})">
+                            Vezi ruta din locația ta
+                        </button>
+
+                        <button class="btn btn-outline-secondary btn-sm"
+                                onclick="routeFromGateTo(${spot.latitude}, ${spot.longitude})">
+                            Vezi ruta de la intrare
+                        </button>
+                    </div>
+                `;
+
+                if (isRouteActive()) {
+                    popupContent += `
+                        <button class="btn btn-outline-secondary btn-sm"
+                                onclick="clearRoute()">
+                            Anulează afișarea rutei
+                        </button>
+                    `;
                 }
 
                 popupContent += `
@@ -621,39 +947,27 @@ function toggleParkingSpot(spotId, currentStatus) {
         const data = await response.json().catch(() => ({}));
         
         if (response.status === 409) {
-            // return response.json().then(data => {
-            //     alert(data.error); });
             showToast(data?.error || 'Loc indisponibil.', 'warning');
             return null;
             
         }
         if (response.status === 403) {
-            // alert('Acest loc e ocupat de o altă persoană!');
             showToast('Acest loc e ocupat de o altă persoană!', 'error');
             return null;
         }
         if (response.status === 401) {
-            // alert('Trebuie să te conectezi pentru a ocupa un loc!');
             showToast('Trebuie să te conectezi pentru a ocupa un loc!', 'error');
             return null;
         }
 
         if (!response.ok) {
-            // throw new Error(`Eroare: ${response.status}`);
             showToast(`Eroare la ocupare (${response.status})`, 'error');
             return null;
         }
-        // return response.json();
         return data;
     })
     .then(data => {
         if (!data) return;
-
-        // console.log('Status loc actualizat:', data);
-        // if (data.warning && data.warning.type === "UPCOMING_RESERVATION") {
-        //     alert(" " + data.warning.message);
-        // }
-        // refreshParkingSpots();
         if (data.warning?.type === "UPCOMING_RESERVATION") {
             showToast(data.warning.message, 'warning', 8000);
         } else {
@@ -670,11 +984,8 @@ function toggleParkingSpot(spotId, currentStatus) {
 
 function reserveParkingSpot(spotId) {
     console.log('Rezervare loc de parcare:', spotId);
-    // TODO: Implementare logica pentru rezervare
-    // alert('Funcționalitate de rezervare - spot #' + spotId);
 
     if (!isLoggedIn()) {
-        // ('Trebuie să te conectezi pentru a rezerva!');
         showToast('Trebuie să te conectezi pentru a rezerva!', 'error');
         return;
     }
@@ -682,14 +993,12 @@ function reserveParkingSpot(spotId) {
     const spot = allParkingSpots.find(s => s.id === spotId);
     
     if (!spot) {
-        // alert('Spot invalid!');
         showToast('Spot invalid!', 'error');
         return;
     }
 
     // Prevent reserving occupied spot (optional rule)
     if (spot.is_occupied) {
-        // alert('Locul este ocupat. Nu poți rezerva acum.');
         showToast('Locul este ocupat. Nu poți rezerva acum.', 'warning');
         return;
     }
@@ -697,7 +1006,6 @@ function reserveParkingSpot(spotId) {
     // If already reserved by you (active reservation), suggest cancel
     const myActive = getActiveReservationForSpot(spotId);
     if (myActive) {
-        // alert('Ai deja o rezervare activă pentru acest loc. Poți să o anulezi din popup sau din sidebar.');
         showToast('Ai deja o rezervare activă pentru acest loc. O poți anula din popup sau din sidebar.', 'warning', 7000);
         return;
     }
@@ -714,10 +1022,10 @@ function openReservationModal(spotId, spot) {
     const endInput = document.getElementById('reserve-end');
     const hint = document.getElementById('reservation-modal-hint');
 
-    // Default: start in 5 minutes, end in 65 minutes
+    // Default: start in 5 minutes, end in 120 minutes
     const now = new Date();
     const start = new Date(now.getTime() + 5 * 60 * 1000);
-    const end = new Date(now.getTime() + 65 * 60 * 1000);
+    const end = new Date(now.getTime() + 120 * 60 * 1000);
 
     function toLocalDatetimeValue(d) {
         const pad = (x) => String(x).padStart(2, '0');
@@ -745,7 +1053,6 @@ function submitReservationModal() {
     const endVal = document.getElementById('reserve-end').value;
 
     if (!startVal || !endVal) {
-        // alert('Completează start și end.');
         showToast('Completează start și end.', 'warning');
         return;
     }
@@ -768,18 +1075,9 @@ function submitReservationModal() {
             showToast('Trebuie să te conectezi pentru a rezerva!', 'error');
             return null;
         }
-        // if (res.status === 400) {
-        //     showToast('Date invalide (interval / format).', 'eroare');
-        //     return null;
-        // }
-        // if (res.status === 409) {
-        //     alert('Loc ocupat sau deja rezervat în interval.');
-        //     return null;
-        // }
         if (!res.ok) {
             const code = data?.error;
             showToast(reservationErrorMessage(code, res.status), 'warning');
-            // alert(`Eroare la rezervare (${res.status})`);
             return null;
         }
         return data;
@@ -805,7 +1103,6 @@ function submitReservationModal() {
         // -----
 
         closeReservationModal();
-        // refresh reservations + spots (so reserved color updates)
         return fetchMyReservations().then(() => refreshParkingSpots());
     })
     .catch(err => {
@@ -816,7 +1113,6 @@ function submitReservationModal() {
 
 function cancelReservation(reservationId) {
     if (!isLoggedIn()) {
-        // alert('Trebuie să te conectezi!');
         showToast('Trebuie să te conectezi!', 'error');
         return;
     }
@@ -826,22 +1122,11 @@ function cancelReservation(reservationId) {
             const data = await res.json().catch(() => ({}));
 
             if (res.status === 401) {
-                // alert('Trebuie să te conectezi!');
                 showToast('Trebuie să te conectezi!', 'error');
                 return false;
             }
 
-            // if (res.status === 403) {
-            //     alert('Nu ai voie să anulezi această rezervare!');
-            //     return false;
-            // }
-            // if (res.status === 404) {
-            //     alert('Rezervarea nu există.');
-            //     return false;
-            // }
-
             if (!res.ok) {
-                // alert(`Eroare la anulare (${res.status})`);
                 const code = data?.error;
                 showToast(reservationErrorMessage(code, res.status), 'warning');
                 return false;
@@ -856,7 +1141,6 @@ function cancelReservation(reservationId) {
         })
         .catch(err => {
             console.error('Eroare anulare rezervare:', err);
-            // alert('Eroare la anulare!');
             showToast('Eroare la anulare! Încearcă din nou.', 'error');
         });
 }
@@ -881,7 +1165,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (window.CURRENT_USER && window.CURRENT_USER.isAuthenticated) {
             fetchMyReservations().then(() => {
-                // refresh spots so popups show correct reserve/cancel buttons
                 refreshParkingSpots();
             });
         }
@@ -977,8 +1260,13 @@ function startAutoRefresh() {
     refreshParkingSpots();
 
     // Optional: also refresh reservation panels if you show them
+    // if (window.CURRENT_USER?.isAuthenticated && typeof fetchMyReservations === "function") {
+    //   fetchMyReservations();
+    // }
+
     if (window.CURRENT_USER?.isAuthenticated && typeof fetchMyReservations === "function") {
-      fetchMyReservations();
+        // Keep sidebar updated, but avoid reloading full history too often
+        fetchMyReservations({ forceFull: false });
     }
   }, AUTO_REFRESH_MS);
 }

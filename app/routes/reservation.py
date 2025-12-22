@@ -1,11 +1,6 @@
 """
 Endpoint-uri pentru rezervări.
 
-TODO (Task 9):
-- Creare rezervare (POST /)
-- Anulare rezervare (DELETE /<id>)
-TODO (Task 10):
-- Vizualizare rezervări anterioare pentru user (GET /my)
 """
 
 from flask import Blueprint, request, jsonify
@@ -25,8 +20,6 @@ reservation_bp = Blueprint("reservation", __name__)
 @login_required
 def create_reservation():
     """
-    TODO (Task 9): Creează o rezervare pentru un loc de parcare.
-
     Request JSON:
     {
       "spot_id": 10,
@@ -48,7 +41,6 @@ def create_reservation():
     - 400: interval invalid (start >= end etc.)
     - 409: loc deja rezervat / ocupat în interval
     """
-    # return {"message": "create_reservation – TODO Task 9"}, 501
     data = request.get_json() or {}
     spot_id = data.get("spot_id")
     start_time = data.get("start_time")
@@ -88,7 +80,6 @@ def create_reservation():
 @login_required
 def cancel_reservation(reservation_id):
     """
-    TODO (Task 9): Anulează o rezervare existentă.
 
     Răspuns 200 (exemplu):
     {
@@ -99,7 +90,6 @@ def cancel_reservation(reservation_id):
     - 404: rezervare inexistentă
     - 403: user-ul nu are dreptul să anuleze această rezervare
     """
-    # return {"message": "cancel_reservation – TODO Task 9"}, 501
     try:
         cancel_reservation_service(reservation_id, current_user)
         return jsonify({"success": True}), 200
@@ -119,8 +109,6 @@ def cancel_reservation(reservation_id):
 @login_required
 def my_reservations():
     """
-    TODO (Task 10): Returnează rezervările utilizatorului curent (istoric).
-
     Răspuns 200 (exemplu):
     [
       {
@@ -137,17 +125,43 @@ def my_reservations():
     finalize_expired_reservations()
     cancel_no_show_reservations()
 
-    # return {"message": "my_reservations – TODO Task 10"}, 501
-    reservations = get_user_reservations(current_user.id)
+    # that is the old version, without a limit
+    # reservations = get_user_reservations(current_user.id)
 
-    # Full history response (active/cancelled/finished)
-    return jsonify([
-        {
-            "id": r.id,
-            "spot_id": r.spot_id,
-            "start_time": r.start_time.isoformat(),
-            "end_time": r.end_time.isoformat(),
-            "status": r.status,
-        }
-        for r in reservations
-    ]), 200
+    # # Full history response (active/cancelled/finished)
+    # return jsonify([
+    #     {
+    #         "id": r.id,
+    #         "spot_id": r.spot_id,
+    #         "start_time": r.start_time.isoformat(),
+    #         "end_time": r.end_time.isoformat(),
+    #         "status": r.status,
+    #     }
+    #     for r in reservations
+    # ]), 200
+
+    limit = int(request.args.get("limit", 5))
+    offset = int(request.args.get("offset", 0))
+
+    q = (
+        Reservation.query
+        .filter_by(user_id=current_user.id)
+        .order_by(Reservation.start_time.desc())
+    )
+
+    total = q.count()
+    reservations = q.offset(offset).limit(limit).all()
+
+    return jsonify({
+        "total": total,
+        "items": [
+            {
+                "id": r.id,
+                "spot_id": r.spot_id,
+                "start_time": r.start_time.isoformat(),
+                "end_time": r.end_time.isoformat(),
+                "status": r.status,
+            }
+            for r in reservations
+        ]
+    }), 200
