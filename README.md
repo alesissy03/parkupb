@@ -4,9 +4,13 @@ Aplicație pentru monitorizarea și gestionarea locurilor de parcare din cadrul 
 
 # Reservations for statistics
 To add reservations:
+```bash
 python seed_fake_reservations.py <parking_lot name>
+```
 To delete reservations:
+```bash
 python delete_fake_reservations.py
+```
 
 ## Prerequisites
 
