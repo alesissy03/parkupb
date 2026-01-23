@@ -8,6 +8,7 @@ from flask import Blueprint, jsonify, request
 from flask_login import login_required, current_user
 from app.models import ParkingSpot, ParkingLot, Reservation
 from app.extensions import db
+from app.services.parking_service import get_parking_stats, get_hourly_occupancy_probability
 from app.services.reservation_service import finalize_expired_reservations, cancel_no_show_reservations
 from datetime import datetime
 
@@ -278,9 +279,7 @@ def modify_spot(spot_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
     
-    
 @parking_bp.route('/spots/<int:spot_id>/toggle', methods=['POST'])
-@login_required
 def toggle_spot_occupancy(spot_id):
     """
     Toggle ocupare loc de parcare.
@@ -288,6 +287,11 @@ def toggle_spot_occupancy(spot_id):
     - Dacă e ocupat de el, îl eliberează
     - Dacă e ocupat de altcineva, eroare 403
     """
+    if not current_user.is_authenticated:
+        return jsonify({
+            "error": "UNAUTHORIZED",
+            "message": "Este necesar sa te loghezi pentru aceasta actiune"
+        }), 401
     spot = ParkingSpot.query.get_or_404(spot_id)
 
     finalize_expired_reservations()
@@ -297,19 +301,6 @@ def toggle_spot_occupancy(spot_id):
 
     # Daca locul e liber, il poate ocupa oricine
     if not spot.is_occupied:
-        # Verifica daca utilizatorul ocupa deja alt loc
-        # occupied_spots = ParkingSpot.query.filter_by(
-        #     occupied_by_email=current_user.email,
-        #     is_occupied=True
-        # ).first()
-        
-        # if occupied_spots:
-        #     return jsonify({
-        #         'error': f'Ocupi deja locul {occupied_spots.parking_lot} #{occupied_spots.spot_number}. Eliberează-l înainte de a ocupa altul!'
-        #     }), 409
-        
-        # spot.is_occupied = True
-        # spot.occupied_by_email = current_user.email
         active_res = (
             Reservation.query
             .filter(
@@ -389,3 +380,27 @@ def toggle_spot_occupancy(spot_id):
         'is_occupied': spot.is_occupied,
         'occupied_by_email': spot.occupied_by_email
     }), 200
+
+@parking_bp.route("/stats", methods=["GET"])
+def parking_stats():
+    try:
+        lot = request.args.get("lot")
+        hour = request.args.get("hour", type=int)  # <-- ADĂUGAT
+
+        base = get_parking_stats(lot)
+
+        hourly = get_hourly_occupancy_probability(lot, days=7)
+        base["hourly_occupancy_probability"] = hourly
+        base["analysis_days"] = 7
+
+        if hour is not None:
+            match = next((x for x in hourly if x["hour"] == hour), None)
+            base["selected_hour"] = hour
+            base["selected_hour_probability_percent"] = (
+                match["percent"] if match else 0.0
+            )
+
+        return jsonify(base), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+

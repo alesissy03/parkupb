@@ -67,6 +67,63 @@
             </div>
         </section>
 
+        <!-- Parking Lot Stats Section -->
+        <section class="sidebar-section" id="stats-section">
+            <div class="section-header">
+                <h3>Statistici parcare</h3>
+            </div>
+            <div class="section-content">
+                <div id="stats-title" class="text-muted">Selectează o parcare</div>
+
+                <div class="filter-group" style="margin-top:10px;">
+                    <label for="stats-hour" class="form-label">Ora analizată:</label>
+                    <select id="stats-hour" class="form-control" onchange="refreshStats()">
+                        <option value="">Toată ziua (distribuție)</option>
+                        <option value="8">08:00</option>
+                        <option value="9">09:00</option>
+                        <option value="10">10:00</option>
+                        <option value="11">11:00</option>
+                        <option value="12">12:00</option>
+                        <option value="13">13:00</option>
+                        <option value="14">14:00</option>
+                        <option value="15">15:00</option>
+                        <option value="16">16:00</option>
+                        <option value="17">17:00</option>
+                        <option value="18">18:00</option>
+                        <option value="19">19:00</option>
+                        <option value="20">20:00</option>
+                    </select>
+                    <small class="text-muted">Probabilitatea este calculată din ultimele 7 zile.</small>
+                    </div>
+
+                    <div class="stat-card" style="margin-top:10px;">
+                    <div class="stat-label">Probabilitate ocupat la ora selectată</div>
+                    <div class="stat-value" id="stat-hour-prob">—</div>
+                    </div>
+
+                    <!-- opțional: mini chart pe ore -->
+                    <div id="hourly-mini-chart" style="margin-top:10px;"></div>
+
+                <div class="stats-grid">
+                <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value" id="stat-total">-</div></div>
+                <div class="stat-card"><div class="stat-label">Libere</div><div class="stat-value" id="stat-free">-</div></div>
+                <div class="stat-card"><div class="stat-label">Ocupate</div><div class="stat-value" id="stat-occupied">-</div></div>
+                <div class="stat-card"><div class="stat-label">Rezervate</div><div class="stat-value" id="stat-reserved">-</div></div>
+                </div>
+
+                <div class="availability">
+                <div class="availability-row">
+                    <span>Disponibilitate</span>
+                    <strong id="stat-availability">-</strong>
+                </div>
+                <div class="progress">
+                    <div class="progress-bar" id="availability-bar" style="width:0%"></div>
+                </div>
+                <small class="text-muted" id="stats-updated">—</small>
+                </div>
+            </div>
+        </section>
+
         <!-- Current Reservation Section -->
         <section class="sidebar-section">
             <div class="section-header">

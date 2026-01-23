@@ -368,6 +368,200 @@ function setRoutingCancelVisible(visible) {
 
 // end of helpers
 
+// ===== STATS (backend) =====
+
+let lastStatsLot = null;
+
+function getSelectedParkingLotName() {
+    const sel = document.getElementById('filter-parking-lot');
+    if (!sel) return '';
+    return (sel.value || '').trim();
+}
+
+function getSelectedStatsHour() {
+    const sel = document.getElementById('stats-hour');
+    if (!sel) return '';
+    return (sel.value || '').trim(); // "" sau "13"
+}
+
+function renderHourlyStats(stats, hour) {
+  const probEl = document.getElementById("stat-hour-prob");
+  if (!probEl) return;
+
+  // 1) Text probabilitate pentru ora selectată
+  if (hour !== "") {
+    const pct = stats?.selected_hour_probability_percent;
+    probEl.textContent = (pct === undefined || pct === null) ? "—" : `${pct}%`;
+  } else {
+    probEl.textContent = "—";
+  }
+
+  // 2) Mini chart (distribuție)
+  const chart = document.getElementById("hourly-mini-chart");
+  if (!chart) return;
+
+  const arr = stats?.hourly_occupancy_probability;
+  if (!Array.isArray(arr) || arr.length === 0) {
+    chart.innerHTML = "";
+    return;
+  }
+
+  const filtered = arr.filter(x => x.hour >= 8 && x.hour <= 20);
+  const selectedHour = (hour === "" ? null : Number(hour));
+
+  chart.innerHTML = `
+    <div style="font-size:12px; margin-bottom:6px; color:#666;">Distribuție pe ore (8–20)</div>
+    <div id="hourly-bars" style="display:flex; gap:4px; align-items:flex-end; height:50px;">
+      ${filtered.map(x => {
+        const pct = Number(x.percent ?? (x.p * 100) ?? 0);
+        const h = x.hour;
+        const barH = Math.max(0, Math.min(50, Math.round(pct / 2)));
+
+        // Dacă e selectată o oră: highlight doar pe ea, restul dimmed
+        // Dacă nu e selectată: toate normale
+        const classes = [
+          "hour-bar",
+          (selectedHour === null) ? "" : (h === selectedHour ? "selected" : "dimmed")
+        ].join(" ").trim();
+
+        return `
+          <div
+            class="${classes}"
+            data-hour="${h}"
+            title="${String(h).padStart(2,'0')}:00 • ${pct.toFixed(1)}%"
+            style="height:${barH}px"
+          ></div>
+        `;
+      }).join("")}
+    </div>
+  `;
+
+  // 3) Click pe bară => selectează ora din dropdown + refresh
+  const bars = document.querySelectorAll("#hourly-bars .hour-bar");
+  bars.forEach(bar => {
+    bar.addEventListener("click", () => {
+      const h = bar.getAttribute("data-hour");
+      const sel = document.getElementById("stats-hour");
+      if (sel) {
+        sel.value = h;
+        refreshStats();
+      }
+    });
+  });
+}
+
+function refreshStats() {
+    const lotName = getSelectedParkingLotName(); // din dropdown-ul de parcare
+    const hour = getSelectedStatsHour();
+
+    console.log("refreshStats()", { lotName, hour });
+
+    const params = new URLSearchParams();
+    if (lotName) params.set("lot", lotName);
+    if (hour !== "") params.set("hour", hour);
+
+    const url = `/parking/stats${params.toString() ? `?${params.toString()}` : ""}`;
+
+    fetch(url)
+        .then(r => {
+        if (!r.ok) throw new Error(`Stats API error: ${r.status}`);
+        return r.json();
+        })
+        .then(stats => {
+        renderStats(stats, lotName);
+        renderHourlyStats(stats, hour);
+        })
+        .catch(err => {
+        console.warn("Eroare refreshStats:", err);
+        const probEl = document.getElementById("stat-hour-prob");
+        if (probEl) probEl.textContent = "—";
+        });
+}
+
+window.refreshStats = refreshStats;
+window.getSelectedStatsHour = getSelectedStatsHour;
+window.getSelectedParkingLotName = getSelectedParkingLotName;
+
+function setStatsLoadingState(titleText = "Se încarcă...") {
+    const title = document.getElementById('stats-title');
+    if (title) title.textContent = titleText;
+
+    const ids = ["stat-total", "stat-free", "stat-occupied", "stat-reserved", "stat-availability", "stats-updated"];
+    ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = "—";
+    });
+
+    const bar = document.getElementById("availability-bar");
+    if (bar) bar.style.width = "0%";
+}
+
+function renderStats(stats, lotName) {
+    // stats expected:
+    // { total_spots, free_spots, occupied_spots, reserved_spots, availability_percent, updated_at }
+
+    const title = document.getElementById('stats-title');
+    if (title) title.textContent = lotName ? `Parcare: ${lotName}` : "Statistici globale";
+
+    const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    };
+
+    setText("stat-total", stats?.total_spots ?? 0);
+    setText("stat-free", stats?.free_spots ?? 0);
+    setText("stat-occupied", stats?.occupied_spots ?? 0);
+    setText("stat-reserved", stats?.reserved_spots ?? 0);
+
+    const pct = Number(stats?.availability_percent ?? 0);
+    setText("stat-availability", `${pct}%`);
+
+    const bar = document.getElementById("availability-bar");
+    if (bar) bar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+
+    const updated = document.getElementById("stats-updated");
+    if (updated) {
+        const iso = stats?.updated_at;
+        updated.textContent = iso ? `Actualizat: ${formatDateRO(iso)}` : "—";
+    }
+}
+
+function fetchParkingStatsForSelection({ silent = false } = {}) {
+    // dacă nu ai încă secțiunea de stats în HTML, ieșim fără erori
+    if (!document.getElementById("stats-title")) return Promise.resolve(null);
+
+    const lotName = getSelectedParkingLotName(); // "" => global
+    lastStatsLot = lotName;
+
+    if (!silent) {
+        setStatsLoadingState(lotName ? `Se încarcă: ${lotName}...` : "Se încarcă: global...");
+    }
+
+    const url = lotName
+        ? `/parking/stats?lot=${encodeURIComponent(lotName)}`
+        : `/parking/stats`;
+
+    return fetch(url)
+        .then(res => {
+        if (!res.ok) throw new Error(`Stats API error: ${res.status}`);
+        return res.json();
+        })
+        .then(stats => {
+        // dacă user a schimbat selecția între timp, ignorăm răspunsul vechi
+        if (getSelectedParkingLotName() !== lastStatsLot) return null;
+        renderStats(stats, lotName);
+        return stats;
+        })
+        .catch(err => {
+        console.warn("Eroare stats:", err);
+        if (!silent) {
+            const title = document.getElementById("stats-title");
+            if (title) title.textContent = "Statistici indisponibile";
+        }
+        return null;
+        });
+}
+
 // funcții pentru rutare
 
 function initRouting() {
@@ -1162,6 +1356,7 @@ document.addEventListener('DOMContentLoaded', function() {
         initMap();
         initializeFilters();
         startAutoRefresh();
+        refreshStats();
 
         if (window.CURRENT_USER && window.CURRENT_USER.isAuthenticated) {
             fetchMyReservations().then(() => {
@@ -1191,6 +1386,7 @@ function initializeFilters() {
             
             restoreFilters();
             applyFilters();
+            fetchParkingStatsForSelection({ silent: false });
         })
         .catch(error => console.error('Eroare la popularea filtrelor:', error));
 }
@@ -1219,8 +1415,10 @@ function applyFilters() {
     });
     
     document.getElementById('spots-count').textContent = `Locuri afișate: ${visibleCount}/${markers.length}`;
-    
+    fetchParkingStatsForSelection({ silent: true });
+
     saveFilters();
+    refreshStats();
 }
 
 function resetFilters() {
@@ -1228,6 +1426,8 @@ function resetFilters() {
     document.getElementById('filter-status').value = '';
     localStorage.removeItem('parkingFilters');
     applyFilters();
+    fetchParkingStatsForSelection({ silent: false });
+    refreshStats();
 }
 
 function saveFilters() {
@@ -1258,6 +1458,7 @@ function startAutoRefresh() {
     // This will fetch latest spots; since backend finalizes expired ones here,
     // the yellow -> green/red transitions happen automatically.
     refreshParkingSpots();
+    fetchParkingStatsForSelection({ silent: true });
 
     // Optional: also refresh reservation panels if you show them
     // if (window.CURRENT_USER?.isAuthenticated && typeof fetchMyReservations === "function") {

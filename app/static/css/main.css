@@ -212,3 +212,22 @@ main {
 .error-container {
     margin-top: 1rem;
 }
+
+/* mini chart */
+.hour-bar {
+  width: 10px;
+  border-radius: 4px;
+  background: #2d7;
+  transition: transform 0.12s ease, opacity 0.12s ease, outline 0.12s ease;
+  opacity: 0.6;
+}
+
+.hour-bar.selected {
+  opacity: 1;
+  outline: 2px solid #0b5ed7;
+  transform: translateY(-2px) scale(1.05);
+}
+
+.hour-bar.dimmed {
+  opacity: 0.25;
+}
