@@ -2,6 +2,12 @@
 
 Aplicație pentru monitorizarea și gestionarea locurilor de parcare din cadrul campusului UPB.
 
+# Reservations for statistics
+To add reservations:
+python seed_fake_reservations.py <parking_lot name>
+To delete reservations:
+python delete_fake_reservations.py
+
 ## Prerequisites
 
 - Python 3.8 or higher
